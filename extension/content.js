@@ -3,18 +3,34 @@
 // só o texto dele) — e o painel onde a resposta do Claude aparece.
 // Pode ser injetado várias vezes na mesma aba; só registra tudo na primeira.
 (() => {
-  if (window.__claudeAskerLoaded) return;
-  window.__claudeAskerLoaded = true;
+  if (window.__modelAskerLoaded) return;
+  window.__modelAskerLoaded = true;
 
   const Z_TOP = "2147483647";
   const MIN_SIZE = 8;
   // defaults.js (gerado pelo build) é injetado antes deste arquivo.
-  const DEFAULT_HEADER_COLOR = globalThis.CLAUDE_ASKER_DEFAULTS.headerColor;
-  const DEFAULT_HIGHLIGHT_COLOR = globalThis.CLAUDE_ASKER_DEFAULTS.highlightColor;
+  const DEFAULT_HEADER_COLOR = globalThis.MODEL_ASKER_DEFAULTS.headerColor;
+  const DEFAULT_HIGHLIGHT_COLOR = globalThis.MODEL_ASKER_DEFAULTS.highlightColor;
   // Classe no <html> que ativa o cursor de seleção (CSS em picker.css).
-  const PICKING_CLASS = "claude-asker-picking";
+  const PICKING_CLASS = "model-asker-picking";
   // Eventos de mouse bloqueados durante a seleção, para o site não reagir ao clique.
   const BLOCKED_EVENTS = ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick", "auxclick", "contextmenu"];
+
+  // ---- Filtro de interface do modo área (conservador: na dúvida, mantém) ----
+  const SKIP_ATTR = "data-model-asker-skip";
+  const READING_ATTR = "data-model-asker-reading";
+  // Botões só saem se o texto for um comando típico de navegação/plataforma.
+  const UI_COMMAND =
+    /^(pr[óo]xim[ao]( quest[ãa]o| p[áa]gina)?|anterior|voltar|avan[çc]ar|continuar|enviar( respostas?| prova)?|salvar|limpar( sele[çc][ãa]o| resposta)?|(des)?marcar( para revis[ãa]o)?|pular|finalizar( prova| tentativa)?|concluir|confirmar|cancelar|fechar|sair|menu|ajuda|next|previous|prev|back|submit|save|clear( selection)?|skip|finish|flag|review|close|[‹›«»<>←→]+)[\s.!:‹›«»<>←→]*$/i;
+  const UI_BUTTONS = "button, [role=button], input[type=button], input[type=submit], input[type=reset]";
+  // Blocos de interface pela função declarada (role) ou pelo nome (classe/id).
+  const UI_BLOCKS =
+    "nav, [role=navigation], [role=toolbar], [role=progressbar], [role=timer], [role=tablist], [role=menubar]";
+  const UI_NAME = /(^|[-_\s])(timer|countdown|cronometro|progress|progresso|breadcrumbs?|pagination|paginacao|toolbar)([-_\s]|$)/i;
+  // Nunca remover: opções de resposta ou o que as contenha.
+  const ANSWER_LIKE =
+    "input[type=radio], input[type=checkbox], label, [role=radio], [role=option], [role=checkbox], [role=menuitemradio], select";
+  const ALTERNATIVE_TEXT = /^\(?[a-e1-9][).:\-–]\s/i;
 
   let overlayHost = null;
   let picker = null;
@@ -93,7 +109,7 @@
         :host { all: initial; }
         .layer { position: fixed; inset: 0; cursor: crosshair; background: rgba(0,0,0,.25); user-select: none; }
         .layer.dragging { background: transparent; }
-        .box { position: fixed; display: none; border: 2px dashed #d97757;
+        .box { position: fixed; display: none; border: 2px dashed #8b5cf6;
                box-shadow: 0 0 0 9999px rgba(0,0,0,.35); pointer-events: none; }
         .hint { position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
                 background: #222; color: #fff; font: 13px system-ui, sans-serif;
@@ -179,7 +195,7 @@
     root.innerHTML = `
       <style>
         :host { all: initial; }
-        .box { --c: 147, 197, 253; position: fixed; display: none; box-sizing: border-box;
+        .box { --c: 196, 181, 253; position: fixed; display: none; box-sizing: border-box;
                background: rgba(var(--c), .16); border: 1.5px solid rgba(var(--c), .75); border-radius: 6px;
                box-shadow: 0 0 0 4px rgba(var(--c), .12);
                transition: left .08s ease, top .08s ease, width .08s ease, height .08s ease; }
@@ -194,7 +210,7 @@
                 box-shadow: 0 2px 14px rgba(0,0,0,.12); }
         kbd { font: inherit; font-size: 11px; background: #eef0f3; border-radius: 4px; padding: 1px 5px; }
         @media (prefers-color-scheme: dark) {
-          .tag, .hint { background: rgba(32,33,36,.94); color: #e8e8e8; }
+          .tag, .hint { background: rgba(27,26,35,.94); color: #ecebf2; }
           kbd { background: #3a3c41; }
         }
       </style>
@@ -296,7 +312,7 @@
 
     if (picker.measured !== el) {
       picker.measured = el;
-      const tokens = estimateTokens(cleanText(el.innerText));
+      const tokens = estimateTokens(extractAreaText(el).text);
       picker.tag.textContent = `${describe(el)} · ≈${tokens.toLocaleString("pt-BR")} tokens`;
     }
   }
@@ -307,7 +323,7 @@
     removeOverlay();
     document.documentElement.classList.remove(PICKING_CLASS);
 
-    const text = cleanText(el.innerText);
+    const { text, skipped, rawChars, guard } = extractAreaText(el);
     if (!text) {
       showError("Essa área não tem texto. Para questões em imagem, use o modo print.");
       return;
@@ -316,10 +332,26 @@
       const r = node.getBoundingClientRect();
       return r.width >= 48 && r.height >= 48;
     }).length;
-    pendingNotice = images
-      ? `${images} imagem(ns) na área não foram enviadas — para figuras use o modo print`
-      : "";
-    chrome.runtime.sendMessage({ type: "element-selected", text });
+    pendingNotice = [
+      skipped && `${skipped} item(ns) de interface ignorado(s)`,
+      images && `${images} imagem(ns) na área não foram enviadas — para figuras use o modo print`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    chrome.runtime.sendMessage({
+      type: "element-selected",
+      text,
+      // Detalhes da extração (usados só no log da versão dev).
+      stats: {
+        element: describe(el),
+        chars: text.length,
+        rawChars,
+        skipped,
+        filterGuard: !!guard,
+        images,
+        estimatedTokens: estimateTokens(text),
+      },
+    });
   }
 
   function stopElementPicker() {
@@ -340,6 +372,71 @@
     if (!/^#[0-9a-f]{6}$/i.test(color ?? "")) color = DEFAULT_HIGHLIGHT_COLOR;
     const rgb = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16)).join(", ");
     picker.box.style.setProperty("--c", rgb);
+  }
+
+  // Texto visível da área sem os itens de interface (botões "Próxima", cronômetro,
+  // navegação...). Os itens são escondidos só durante a leitura do texto, que é
+  // síncrona: a página não chega a ser redesenhada sem eles.
+  function extractAreaText(el) {
+    el.setAttribute(READING_ATTR, "");
+    try {
+      return readAreaText(el);
+    } finally {
+      el.removeAttribute(READING_ATTR);
+    }
+  }
+
+  function readAreaText(el) {
+    const full = cleanText(el.innerText);
+    const noise = findUiNoise(el);
+    if (!noise.length) return { text: full, skipped: 0, rawChars: full.length };
+
+    for (const node of noise) node.setAttribute(SKIP_ATTR, "");
+    const filtered = cleanText(el.innerText);
+    for (const node of noise) node.removeAttribute(SKIP_ATTR);
+
+    // Freio de segurança: se o filtro tirou mais da metade do texto, provavelmente
+    // pegou conteúdo de verdade. Na dúvida, envia a área inteira.
+    if (filtered.length < full.length * 0.5) return { text: full, skipped: 0, rawChars: full.length, guard: true };
+    const topLevel = noise.filter((node) => !noise.some((other) => other !== node && other.contains(node)));
+    return { text: filtered, skipped: topLevel.length, rawChars: full.length };
+  }
+
+  function findUiNoise(root) {
+    const found = new Set();
+    const consider = (el, isNoise) => {
+      if (el !== root && !found.has(el) && isNoise(el) && !isAnswerLike(el)) found.add(el);
+    };
+    const isCommand = (button) => UI_COMMAND.test(commandText(button));
+    for (const el of root.querySelectorAll(UI_BUTTONS)) {
+      // Num grupo de botões em que algum não é comando (ex.: alternativas estilo
+      // Kahoot), todos são conteúdo — mesmo uma alternativa chamada "Voltar".
+      const group = el.parentElement ? [...el.parentElement.children].filter((sib) => sib.matches(UI_BUTTONS)) : [el];
+      consider(el, () => group.every(isCommand));
+    }
+    for (const el of root.querySelectorAll(UI_BLOCKS)) consider(el, () => true);
+    for (const el of root.querySelectorAll("[class], [id]")) {
+      consider(el, () => UI_NAME.test(`${el.id} ${typeof el.className === "string" ? el.className : ""}`));
+    }
+    // Ícones de fonte viram palavras no texto (ex.: "arrow_forward").
+    for (const el of root.querySelectorAll("[class*=material-icons], [class*=material-symbols], [aria-hidden=true]")) {
+      consider(el, () => /material-(icons|symbols)/.test(el.className) || /^[a-z0-9]+(_[a-z0-9]+)+$/.test(el.textContent.trim()));
+    }
+    return [...found];
+  }
+
+  // Texto de um botão sem os nomes de ícones de fonte ("arrow_back Anterior" -> "Anterior").
+  function commandText(button) {
+    let text = button.innerText || button.value || "";
+    for (const icon of button.querySelectorAll("[class*=material-icons], [class*=material-symbols]")) {
+      text = text.replace(icon.textContent, " ");
+    }
+    return text.replace(/\b[a-z0-9]+(_[a-z0-9]+)+\b/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  // Opções de resposta (ou blocos que as contêm) nunca são filtradas.
+  function isAnswerLike(el) {
+    return el.matches(ANSWER_LIKE) || !!el.querySelector(ANSWER_LIKE) || ALTERNATIVE_TEXT.test((el.innerText || "").trim());
   }
 
   // Remove espaços repetidos e linhas vazias em excesso (cada uma custa tokens).
@@ -400,15 +497,15 @@
       <style>
         /* Impede que estilos herdados do site (cor, fonte, sombra) afetem o painel. */
         :host { all: initial; }
-        .panel { --header-bg: #d97757; --header-fg: #fff;
-                 --surface: #fff; --text: #111; --muted: #555; --answer-bg: #f4f5f7; --answer-text: #0b0b0b;
+        .panel { --header-bg: #7c3aed; --header-fg: #fff;
+                 --surface: #fff; --text: #16141d; --muted: #67637a; --answer-bg: #f5f3fb; --answer-text: #0e0c14;
                  --error-bg: #fdecea; --error-text: #b3261e; --shadow: rgba(0,0,0,.3);
                  width: 400px; max-width: calc(100vw - 32px); background: var(--surface); color: var(--text);
                  border-radius: 10px; box-shadow: 0 8px 30px var(--shadow);
                  font: 14px/1.5 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
         /* Tema escuro acompanha o do navegador/sistema. */
         @media (prefers-color-scheme: dark) {
-          .panel { --surface: #1f2023; --text: #ececec; --muted: #a3a6ab; --answer-bg: #2b2d31;
+          .panel { --surface: #1b1a23; --text: #ecebf2; --muted: #a29eb0; --answer-bg: #262433;
                    --answer-text: #f4f4f4; --error-bg: #3b2120; --error-text: #ff8a80; --shadow: rgba(0,0,0,.6); }
         }
         .header { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
@@ -439,7 +536,7 @@
       <div class="panel">
         <div class="header">
           <div class="titles">
-            <div class="title">Claude Asker</div>
+            <div class="title">Model Asker</div>
             <div class="meta"></div>
             <div class="usage"></div>
           </div>

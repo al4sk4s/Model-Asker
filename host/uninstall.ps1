@@ -1,5 +1,5 @@
-# Remove o registro do host do Claude Asker.
-$hostName = "com.claude_asker.host"
+# Remove o registro do host do Model Asker.
+$hostName = "com.model_asker.host"
 $browsers = @(
   "HKCU\Software\Google\Chrome\NativeMessagingHosts\$hostName",
   "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\$hostName",

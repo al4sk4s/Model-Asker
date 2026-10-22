@@ -1,15 +1,15 @@
-# Registra o host do Claude Asker para Chrome, Edge e Brave (só para o seu usuário).
+# Registra o host do Model Asker para Chrome, Edge e Brave (só para o seu usuário).
 # Uso: powershell -ExecutionPolicy Bypass -File host\install.ps1
 $ErrorActionPreference = "Stop"
 
-$hostName = "com.claude_asker.host"
+$hostName = "com.model_asker.host"
 $hostDir = $PSScriptRoot
 $node = (Get-Command node).Source
 $claude = (Get-Command claude).Source
 $extensionId = (& $node (Join-Path $hostDir "extension-id.mjs")).Trim()
 
 # Arquivo .bat que o navegador executa (aponta para node e claude com caminho completo).
-$batPath = Join-Path $hostDir "claude_asker_host.bat"
+$batPath = Join-Path $hostDir "model_asker_host.bat"
 $bat = "@echo off`r`nset `"CLAUDE_BIN=$claude`"`r`n`"$node`" `"%~dp0host.js`" %*`r`n"
 [IO.File]::WriteAllText($batPath, $bat, (New-Object Text.ASCIIEncoding))
 
@@ -17,7 +17,7 @@ $bat = "@echo off`r`nset `"CLAUDE_BIN=$claude`"`r`n`"$node`" `"%~dp0host.js`" %*
 $manifestPath = Join-Path $hostDir "$hostName.json"
 $manifest = [ordered]@{
   name            = $hostName
-  description     = "Claude Asker - ponte para o Claude Code"
+  description     = "Model Asker - ponte para o Claude Code"
   path            = $batPath
   type            = "stdio"
   allowed_origins = @("chrome-extension://$extensionId/")

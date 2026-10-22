@@ -1,5 +1,5 @@
 // Padrões gerados pelo build (defaults.js, carregado antes deste arquivo).
-const DEFAULTS = globalThis.CLAUDE_ASKER_DEFAULTS;
+const DEFAULTS = globalThis.MODEL_ASKER_DEFAULTS;
 
 const PROVIDER_HELP = {
   subscription:

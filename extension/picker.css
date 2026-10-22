@@ -1,6 +1,18 @@
 /* Cursor do modo área: seta com um quadradinho tracejado ("escolha um bloco").
    Injetado pela extensão; só vale enquanto o <html> tem a classe abaixo. */
-html.claude-asker-picking,
-html.claude-asker-picking * {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cpath d='M3 2 L3 19 L7.5 14.8 L10.5 21.5 L13.3 20.3 L10.4 13.7 L16.5 13.5 Z' fill='white' stroke='%23222' stroke-width='1.4' stroke-linejoin='round'/%3E%3Crect x='15.5' y='15.5' width='12' height='12' rx='3' fill='rgba(147,197,253,0.55)' stroke='%233b82f6' stroke-width='1.5' stroke-dasharray='2.6 1.8'/%3E%3C/svg%3E") 3 2, cell !important;
+/* Itens de interface (botões "Próxima", cronômetro...) escondidos por um instante
+   enquanto o texto da área é lido; o atributo é removido logo em seguida. */
+[data-model-asker-skip] {
+  display: none !important;
+}
+
+/* Durante a leitura, botões/opções lado a lado viram linhas separadas no texto
+   (senão "Casa", "Voltar", "Azul" chegariam como "CasaVoltarAzul"). */
+[data-model-asker-reading] :is(button, [role=button], [role=option], [role=radio], [role=checkbox], [role=menuitemradio]):not([data-model-asker-skip]) {
+  display: block !important;
+}
+
+html.model-asker-picking,
+html.model-asker-picking * {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cpath d='M3 2 L3 19 L7.5 14.8 L10.5 21.5 L13.3 20.3 L10.4 13.7 L16.5 13.5 Z' fill='white' stroke='%23222' stroke-width='1.4' stroke-linejoin='round'/%3E%3Crect x='15.5' y='15.5' width='12' height='12' rx='3' fill='rgba(196,181,253,0.55)' stroke='%237c3aed' stroke-width='1.5' stroke-dasharray='2.6 1.8'/%3E%3C/svg%3E") 3 2, cell !important;
 }

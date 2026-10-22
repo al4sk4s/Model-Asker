@@ -6,11 +6,14 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 // Pasta vazia para o Claude Code rodar sem pegar CLAUDE.md de nenhum projeto.
-const WORK_DIR = path.join(os.tmpdir(), "claude-asker");
+const WORK_DIR = path.join(os.tmpdir(), "model-asker");
 const LOG_FILE = path.join(WORK_DIR, "host.log");
+// Log detalhado por pergunta, só quando a extensão dev pede (message.debug).
+const DEBUG_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "logs");
 
 fs.mkdirSync(WORK_DIR, { recursive: true });
 
@@ -91,6 +94,111 @@ function fetchPlanUsage() {
   });
 }
 
+// ---------- Log de desenvolvimento ----------
+// logs/requests.jsonl: tudo de cada pergunta (instruções, conteúdo, argumentos,
+// eventos do Claude Code, uso, tempos). logs/resumo.txt: uma linha por pergunta.
+// Imagens enviadas ficam em logs/<id>-imagem<N>.<ext>.
+function startTrace(message, args, env) {
+  fs.mkdirSync(DEBUG_DIR, { recursive: true });
+  const t0 = Date.now();
+  const id = new Date(t0).toISOString().replace(/[:.]/g, "-");
+  let firstTextAt = null;
+  let textChunks = 0;
+  let ended = false;
+  const events = [];
+
+  // Conteúdo como foi enviado; imagens viram arquivos (o base64 não cabe no log).
+  const content = message.content.map((block, i) => {
+    if (block.type !== "image") return { ...block, chars: block.text?.length };
+    const ext = block.source.media_type.split("/")[1];
+    const file = `${id}-imagem${i}.${ext}`;
+    fs.writeFileSync(path.join(DEBUG_DIR, file), Buffer.from(block.source.data, "base64"));
+    return { type: "image", media_type: block.source.media_type, file, base64Chars: block.source.data.length };
+  });
+
+  return {
+    event(event) {
+      const isText = event.type === "stream_event" && event.event?.delta?.type === "text_delta";
+      if (isText) {
+        textChunks++;
+        firstTextAt ??= Date.now() - t0;
+      } else {
+        events.push({ ms: Date.now() - t0, ...event });
+      }
+    },
+    end(extra) {
+      if (ended) return;
+      ended = true;
+      const result = events.find((e) => e.type === "result");
+      const entry = {
+        id,
+        time: new Date(t0).toISOString(),
+        debug: message.debug, // modo, configurações, extração, uso antes (vem da extensão)
+        request: {
+          model: message.model,
+          effort: message.effort,
+          instructions: message.instructions,
+          instructionsChars: message.instructions.length,
+          content,
+          args: args.map((a) => (a === message.instructions ? "<instructions>" : a)),
+          envFlags: Object.fromEntries(Object.entries(env).filter(([k]) => k.startsWith("CLAUDE_CODE_"))),
+        },
+        timing: { firstTextMs: firstTextAt, totalMs: Date.now() - t0, textChunks },
+        result: result
+          ? {
+              text: result.result,
+              stop_reason: result.stop_reason,
+              // Custo a preço de lista calculado pelo Claude Code: a melhor medida
+              // para comparar configurações (o % do /usage só muda de 1 em 1).
+              total_cost_usd: result.total_cost_usd,
+              usage: result.usage,
+              modelUsage: result.modelUsage,
+              duration_ms: result.duration_ms,
+              duration_api_ms: result.duration_api_ms,
+              num_turns: result.num_turns,
+            }
+          : null,
+        events,
+        ...extra,
+      };
+      fs.appendFileSync(path.join(DEBUG_DIR, "requests.jsonl"), JSON.stringify(entry) + "\n");
+      fs.appendFileSync(path.join(DEBUG_DIR, "resumo.txt"), summaryLine(entry) + "\n");
+    },
+  };
+}
+
+function summaryLine(entry) {
+  const u = entry.result?.usage ?? {};
+  const d = entry.debug ?? {};
+  const fresh = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+  const before = d.before ?? [];
+  const usage = (entry.after ?? [])
+    .map((w) => {
+      const b = before.find((x) => x.name === w.name);
+      return `${w.name === "session" ? "sessão" : "semana"} ${b ? `${b.used}→` : ""}${w.used}%`;
+    })
+    .join(", ");
+  const extraction = d.extraction ?? {};
+  const what =
+    d.mode === "element"
+      ? `texto ${extraction.chars} chars (bruto ${extraction.rawChars}, ${extraction.skipped} itens filtrados)`
+      : `imagem ${extraction.final?.w}x${extraction.final?.h} ≈${extraction.imageTokens} tok (recorte ${extraction.crop?.w}x${extraction.crop?.h})`;
+  return [
+    entry.time.replace("T", " ").slice(0, 19),
+    d.mode ?? "?",
+    entry.result ? `custo $${(entry.result.total_cost_usd ?? 0).toFixed(5)}` : "",
+    `${entry.request.model.replace("claude-", "")}/${entry.request.effort}`,
+    `entrada ${fresh + (u.cache_read_input_tokens ?? 0)} (novos ${u.input_tokens ?? 0} + gravados ${u.cache_creation_input_tokens ?? 0} + cache ${u.cache_read_input_tokens ?? 0})`,
+    `saída ${u.output_tokens ?? "?"} (raciocínio ${u.output_tokens_details?.thinking_tokens ?? "?"})`,
+    what,
+    usage,
+    `${(entry.timing.totalMs / 1000).toFixed(1)}s`,
+    entry.error ? `ERRO: ${entry.error}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
 // Tipo do plano logado no Claude Code ("pro", "max"...), via `claude auth status`.
 // Só esse campo é lido; nenhum dado da conta sai daqui.
 function fetchPlanType() {
@@ -139,19 +247,24 @@ function handle(message) {
     "--no-session-persistence",
     // Sem nome, o Claude Code faz uma chamada extra ao Haiku (~1.200 tokens)
     // só para gerar um título para a sessão.
-    "--name", "claude-asker",
+    "--name", "model-asker",
     "--system-prompt", message.instructions,
     "--model", message.model,
     "--effort", message.effort,
   ];
 
-  // Desliga chamadas auxiliares do Claude Code que também consomem do plano, e os
-  // anexos automáticos de contexto que ele põe em cada mensagem (~25 tokens).
+  // Desliga chamadas auxiliares do Claude Code que também consomem do plano, os
+  // anexos automáticos de contexto que ele põe em cada mensagem (~25 tokens) e o
+  // cache de prompt: cada pergunta é diferente e a parte fixa é pequena demais
+  // para o cache, então nada era reaproveitado — e gravar no cache de 1 h custa
+  // o dobro. Medido no Opus: $0.0068 -> $0.0036 por pergunta (-47%).
   const env = {
     ...subscriptionEnv(),
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     CLAUDE_CODE_DISABLE_ATTACHMENTS: "1",
+    DISABLE_PROMPT_CACHING: "1",
   };
+  const trace = message.debug ? startTrace(message, args, env) : null;
   child = spawn(CLAUDE_BIN, args, { cwd: WORK_DIR, env, windowsHide: true });
 
   let stdoutBuffer = "";
@@ -175,16 +288,19 @@ function handle(message) {
 
   child.on("error", (err) => {
     log(`falha ao iniciar ${CLAUDE_BIN}: ${err.message}`);
+    trace?.end({ error: err.message });
     finish({ type: "error", message: `Não consegui iniciar o Claude Code (${err.message}). Rode host/install.ps1 de novo.` });
   });
 
   child.on("exit", (code) => {
     if (gotResult) return;
     log(`claude saiu com código ${code}: ${stderrText}`);
+    trace?.end({ error: `código ${code}`, stderr: stderrText });
     finish({ type: "error", message: stderrText.trim() || `O Claude Code encerrou com código ${code}.` });
   });
 
   function onEvent(event) {
+    trace?.event(event);
     if (event.type === "stream_event" && !event.parent_tool_use_id) {
       const delta = event.event?.delta;
       if (event.event.type === "content_block_delta" && delta?.type === "text_delta") {
@@ -207,6 +323,7 @@ function handle(message) {
       gotResult = true;
       if (event.is_error || event.subtype !== "success") {
         log(`erro do Claude Code: ${JSON.stringify(event)}`);
+        trace?.end({ error: event.result });
         finish({ type: "error", message: event.result || "O Claude Code retornou um erro." });
         return;
       }
@@ -228,7 +345,10 @@ function handle(message) {
         },
       });
       child.kill();
-      fetchPlanUsage().then((windows) => finish({ type: "usage", windows: windows ?? limits }));
+      fetchPlanUsage().then((windows) => {
+        trace?.end({ after: windows ?? limits });
+        finish({ type: "usage", windows: windows ?? limits });
+      });
     }
   }
 

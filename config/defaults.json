@@ -2,10 +2,10 @@
   "provider": "subscription",
   "apiKey": "",
   "captureMode": "print",
-  "highlightColor": "#93c5fd",
+  "highlightColor": "#c4b5fd",
   "model": "claude-opus-5-5",
   "effort": "medium",
   "style": "direct",
   "extra": "",
-  "headerColor": "#d97757"
+  "headerColor": "#7c3aed"
 }

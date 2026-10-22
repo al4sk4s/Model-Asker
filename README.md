@@ -1,4 +1,4 @@
-# Claude Asker
+# Model Asker
 
 Extensão para **Chrome / Edge / Brave** (Windows) que resolve questões da tela com o **Claude**:
 clique no ícone, selecione a questão e a resposta aparece num painel na própria página.
@@ -25,8 +25,8 @@ clique no ícone, selecione a questão e a resposta aparece num painel na própr
 
 ### 2. Baixe a release
 
-Na página [**Releases**](../../releases), baixe `claude-asker-vX.Y.Z.zip` e extraia numa pasta fixa
-(ex.: `C:\Ferramentas\claude-asker`). Não apague a pasta depois — o navegador carrega a extensão de lá.
+Na página [**Releases**](../../releases), baixe `model-asker-vX.Y.Z.zip` e extraia numa pasta fixa
+(ex.: `C:\Ferramentas\model-asker`). Não apague a pasta depois — o navegador carrega a extensão de lá.
 
 ### 3. Instale o host (ponte com o Claude Code)
 
@@ -77,15 +77,14 @@ Troque de modo clicando com o **botão direito no ícone**. As demais opções f
 
 ```
 Opus 5.5 · plano Pro · esforço médio
-377 tokens +595 cache · Sessão: 51% (+1%) · Semana: 30% (+<1%)
+826 tokens · Sessão: 51% (+1%) · Semana: 30% (+<1%)
 ```
 
-- **377 tokens**: o que esta pergunta gastou de verdade (entrada nova + resposta + raciocínio).
-- **+595 cache**: contexto fixo reaproveitado do cache — custa ~10% do normal.
+- **tokens**: o que esta pergunta gastou (entrada + resposta + raciocínio interno).
 - **Sessão / Semana**: uso real da sua conta (o mesmo do comando `/usage` do Claude Code), lido logo após a resposta.
 - **(+N%)**: quanto **esta pergunta** debitou — comparação com o uso medido quando você ativou a seleção.
   O Claude informa o uso em porcentagens inteiras, então gastos menores que 1% aparecem como `+<1%`.
-- Passe o mouse sobre a linha para ver o detalhamento (cache, raciocínio interno) e quando cada limite renova.
+- Passe o mouse sobre a linha para ver o detalhamento (entrada, saída, raciocínio) e quando cada limite renova.
 
 O painel e a página de configurações seguem o **tema claro/escuro do navegador**.
 
@@ -93,11 +92,18 @@ O painel e a página de configurações seguem o **tema claro/escuro do navegado
 
 O que a ferramenta já faz sozinha:
 
-- **Modo área** envia só texto — normalmente o mais barato, principalmente com várias questões de uma vez.
+- **Modo área** envia só texto (nenhum código HTML) — normalmente o mais barato, principalmente com várias
+  questões de uma vez. Ignora itens de interface dentro da área (botões "Próxima"/"Enviar", cronômetro,
+  barra de progresso, navegação, nomes de ícones), de forma conservadora: alternativas nunca são removidas,
+  e se o filtro tirar mais da metade do texto a área vai inteira. O painel mostra quantos itens foram ignorados.
 - **Modo print** apara automaticamente as margens vazias do recorte, reduz a imagem em telas com zoom
   (até 30%, sem perder legibilidade) e limita o tamanho a ~0,8 MP.
-- O contexto fixo do Claude Code (~550 tokens) fica em **cache** entre perguntas do mesmo modelo (custa ~10%).
+- **Cache de prompt desligado**: cada pergunta é diferente e a parte fixa é pequena demais para o cache, então
+  nada era reaproveitado — e o Claude Code gravava tudo no cache de 1 hora, que custa o **dobro**.
+  Medido no Opus: de $0,0068 para $0,0036 por pergunta (**−47%**).
 - O host desliga chamadas auxiliares do Claude Code (título de sessão, anexos de contexto) que gastariam tokens à toa.
+- Ainda vão em toda pergunta ~550 tokens fixos do próprio Claude Code (identificação, seu e-mail da conta e
+  informações do ambiente). Não há opção oficial para removê-los.
 
 Escolhendo modelo e esforço (medido com as mesmas questões):
 
@@ -140,12 +146,15 @@ build.mjs             gera dist/public, dist/dev e o zip de release
 ```bash
 npm install
 npm run build        # dist/public  — padrões neutros (o que é publicado)
-npm run build:dev    # dist/dev     — padrões + config/dev.json; nome "Claude Asker (dev)"
+npm run build:dev    # dist/dev     — padrões + config/dev.json; nome "Model Asker (dev)"
 npm run watch:dev    # refaz o dev a cada alteração
-npm run release      # release/claude-asker-v<versão>.zip (build public + host)
+npm run release      # release/model-asker-v<versão>.zip (build public + host)
 ```
 
-Carregue `dist/dev` no navegador para desenvolver. Nada pessoal entra no repositório:
+Carregue `dist/dev` no navegador para desenvolver. A versão dev grava um **log de cada pergunta** (só no modo
+assinatura) em `logs/`: `resumo.txt` (uma linha por pergunta: modo, modelo, tokens, custo, extração, uso
+antes/depois, tempo) e `requests.jsonl` (instruções, conteúdo enviado, argumentos, eventos do Claude Code,
+uso detalhado). As imagens enviadas ficam como arquivos ao lado. A versão public não grava nada. Nada pessoal entra no repositório:
 `config/dev.json`, `dist/`, `release/` e os arquivos gerados pelo `install.ps1` estão no `.gitignore`.
 
 O `manifest.json` tem um campo `key` que fixa o ID da extensão (`obkgoanblboakpomlknmomclngpaicnn`);

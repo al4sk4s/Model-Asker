@@ -27,7 +27,7 @@ const STYLE_PROMPTS = {
 };
 
 const PROMPT = "Resolva.";
-const NATIVE_HOST = "com.claude_asker.host";
+const NATIVE_HOST = "com.model_asker.host";
 
 // Uma imagem custa cerca de (largura × altura) / 750 tokens. Limitar a ~0,8 MP
 // (≤ ~1.070 tokens; lado maior ≤ 1568 px) mantém texto de tamanho normal legível
@@ -53,6 +53,16 @@ const MODE_LABELS = {
 
 // Clique direito no ícone: alterna entre os modos de captura.
 chrome.runtime.onInstalled.addListener(async () => {
+  // Cores padrão das versões antigas (laranja/azul) passam para a paleta roxa;
+  // cores escolhidas por você ficam como estão.
+  const OLD_DEFAULTS = { headerColor: "#d97757", highlightColor: "#93c5fd" };
+  const stored = await chrome.storage.local.get(Object.keys(OLD_DEFAULTS));
+  const updates = {};
+  for (const [key, old] of Object.entries(OLD_DEFAULTS)) {
+    if (stored[key]?.toLowerCase() === old) updates[key] = DEFAULTS[key];
+  }
+  await chrome.storage.local.set(updates);
+
   const { captureMode } = await chrome.storage.local.get(DEFAULTS);
   chrome.contextMenus.removeAll(() => {
     for (const [mode, title] of Object.entries(MODE_LABELS)) {
@@ -90,7 +100,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     if (provider !== "api") usageSnapshots.set(tab.id, askHost({ type: "usage" }));
   } catch (err) {
     // Páginas como chrome://, a Web Store e o visualizador de PDF não aceitam scripts.
-    console.warn("Claude Asker: não foi possível usar esta página.", err);
+    console.warn("Model Asker: não foi possível usar esta página.", err);
     chrome.action.setBadgeText({ tabId: tab.id, text: "!" });
     chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#c0392b" });
     setTimeout(() => chrome.action.setBadgeText({ tabId: tab.id, text: "" }), 3000);
@@ -105,14 +115,20 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     solve(sender.tab, async () => {
       const screenshot = await chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: "png" });
       const image = await cropToBase64(screenshot, msg.rect, msg.viewportWidth);
-      return [{ type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } }];
+      return {
+        mode: "print",
+        blocks: [{ type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } }],
+        info: image.info,
+      };
     });
   } else if (msg.type === "element-selected") {
-    solve(sender.tab, async () => [{ type: "text", text: `Texto extraído da página:\n\n${msg.text}` }]);
+    // Só o texto: as instruções já dizem que o conteúdo pode vir de uma página.
+    solve(sender.tab, async () => ({ mode: "element", blocks: [{ type: "text", text: msg.text }], info: msg.stats }));
   }
 });
 
-// buildContent devolve os blocos (imagem ou texto) com as questões.
+// buildContent devolve { mode, blocks, info }: os blocos (imagem ou texto) com as
+// questões e detalhes de como foram extraídos (usados no log da versão dev).
 async function solve(tab, buildContent) {
   const send = (message) => chrome.tabs.sendMessage(tab.id, message).catch(() => {});
   // Chamar uma API da extensão periodicamente impede o service worker de ser
@@ -122,7 +138,8 @@ async function solve(tab, buildContent) {
   try {
     // 3) Monta o conteúdo (print recortado ou texto da área) antes de mostrar o
     //    painel, para ele não sair no print.
-    const content = [...(await buildContent()), { type: "text", text: PROMPT }];
+    const { mode, blocks, info } = await buildContent();
+    const content = [...blocks, { type: "text", text: PROMPT }];
     const settings = await chrome.storage.local.get(DEFAULTS);
     settings.instructions = [BASE_PROMPT, STYLE_PROMPTS[settings.style] ?? STYLE_PROMPTS.direct, settings.extra]
       .filter(Boolean)
@@ -132,8 +149,18 @@ async function solve(tab, buildContent) {
       meta: { model: settings.model, effort: settings.effort, plan: settings.provider === "api" ? "API" : null },
     });
 
+    // Só na versão dev: detalhes para o log (sem a chave de API).
+    const debug = __DEV__
+      ? {
+          version: chrome.runtime.getManifest().version,
+          mode,
+          settings: { ...settings, apiKey: settings.apiKey ? "<definida>" : "", instructions: undefined },
+          extraction: info,
+        }
+      : null;
+
     if (settings.provider === "api") {
-      await solveWithApi(settings, content, send);
+      await solveWithApi(settings, content, send, debug);
     } else {
       // Uso da conta antes da pergunta: a foto tirada ao entrar no modo de seleção
       // (ou uma leitura agora, se ela se perdeu). Já aparece no painel.
@@ -141,10 +168,15 @@ async function solve(tab, buildContent) {
       usageSnapshots.delete(tab.id);
       before.catch(() => {});
       before.then((msg) => send({ type: "usage-update", windows: msg.windows, plan: msg.plan })).catch(() => {});
-      await solveWithSubscription(settings, content, send, before);
+      if (debug) {
+        // Normalmente já está pronta (foi lida enquanto você selecionava).
+        const snapshot = await Promise.race([before.catch(() => null), new Promise((r) => setTimeout(r, 3000))]);
+        debug.before = snapshot?.windows ?? null;
+      }
+      await solveWithSubscription(settings, content, send, before, debug);
     }
   } catch (err) {
-    console.error("Claude Asker:", err);
+    console.error("Model Asker:", err);
     send({ type: "answer-error", message: describeError(err) });
   } finally {
     clearInterval(keepAlive);
@@ -152,7 +184,7 @@ async function solve(tab, buildContent) {
 }
 
 // Modo assinatura: conversa com host/host.js, que roda o Claude Code logado no seu plano.
-function solveWithSubscription(settings, content, send, before) {
+function solveWithSubscription(settings, content, send, before, debug) {
   return new Promise((resolve, reject) => {
     const port = chrome.runtime.connectNative(NATIVE_HOST);
     let finished = false;
@@ -194,6 +226,7 @@ function solveWithSubscription(settings, content, send, before) {
     port.postMessage({
       type: "solve",
       content,
+      debug, // presente só na versão dev: o host grava tudo em logs/
       instructions: settings.instructions,
       model: settings.model,
       effort: settings.effort,
@@ -215,7 +248,7 @@ function askHost(request) {
 }
 
 // Modo chave de API: chama a API da Anthropic direto do navegador (cobrança por uso).
-async function solveWithApi(settings, content, send) {
+async function solveWithApi(settings, content, send, debug) {
   const client = new Anthropic({ apiKey: settings.apiKey, dangerouslyAllowBrowser: true });
   const params = {
     model: settings.model,
@@ -241,6 +274,8 @@ async function solveWithApi(settings, content, send) {
 
   const message = await stream.finalMessage();
   const u = message.usage;
+  // No modo API não há host: o log da versão dev vai para o console do service worker.
+  if (debug) console.log("[Model Asker dev]", { ...debug, instructions: settings.instructions, content, response: message });
   // A API cobra por uso; não existe porcentagem de cota como na assinatura.
   const usage = {
     input: u.input_tokens + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
@@ -259,6 +294,7 @@ async function solveWithApi(settings, content, send) {
 
 async function cropToBase64(dataUrl, rect, viewportWidth) {
   const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const { width: bitmapWidth, height: bitmapHeight } = bitmap;
 
   // O print vem em pixels físicos; o retângulo está em pixels CSS.
   const scale = bitmap.width / viewportWidth;
@@ -289,7 +325,16 @@ async function cropToBase64(dataUrl, rect, viewportWidth) {
   if (blob.size > MAX_PNG_BYTES) {
     blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.9 });
   }
-  return { mediaType: blob.type, data: toBase64(await blob.arrayBuffer()) };
+  // Cada etapa do tratamento da imagem (usado no log da versão dev).
+  const info = {
+    screen: { w: bitmapWidth, h: bitmapHeight, scale: Number(scale.toFixed(3)) },
+    crop: { w: sw, h: sh },
+    trimmed: { w: box.w, h: box.h },
+    final: { w: canvas.width, h: canvas.height, shrink: Number(shrink.toFixed(3)) },
+    imageTokens: Math.round((canvas.width * canvas.height) / 750),
+    bytes: blob.size,
+  };
+  return { mediaType: blob.type, data: toBase64(await blob.arrayBuffer()), info };
 }
 
 // Menor retângulo que contém tudo o que difere da cor de fundo (a do canto

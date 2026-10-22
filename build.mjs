@@ -2,7 +2,7 @@
 //
 //   node build.mjs public    -> dist/public  (padrões neutros; é o que vai para o GitHub)
 //   node build.mjs dev       -> dist/dev     (padrões + config/dev.json, que é só seu)
-//   node build.mjs release   -> release/claude-asker-v<versão>.zip (build public + host)
+//   node build.mjs release   -> release/model-asker-v<versão>.zip (build public + host)
 //   adicione --watch para refazer a cada alteração
 import * as esbuild from "esbuild";
 import { execFileSync } from "node:child_process";
@@ -46,7 +46,7 @@ function copyStatic() {
   // Lido pelo content script e pela página de opções.
   fs.writeFileSync(
     path.join(outDir, "defaults.js"),
-    `globalThis.CLAUDE_ASKER_DEFAULTS = ${JSON.stringify(defaults, null, 2)};\n`,
+    `globalThis.MODEL_ASKER_DEFAULTS = ${JSON.stringify(defaults, null, 2)};\n`,
   );
   return manifest;
 }
@@ -58,7 +58,8 @@ const buildOptions = {
   format: "esm",
   target: "chrome120",
   outfile: path.join(outDir, "background.js"),
-  define: { __DEFAULTS__: JSON.stringify(defaults) },
+  // __DEV__ liga o log detalhado de cada pergunta (logs/ na pasta do projeto).
+  define: { __DEFAULTS__: JSON.stringify(defaults), __DEV__: JSON.stringify(flavor === "dev") },
   logLevel: "info",
 };
 
@@ -75,7 +76,7 @@ if (watch) {
 if (target === "release") {
   // Pacote para o GitHub: extensão compilada + host (sem arquivos gerados pelo install).
   const stage = path.join(root, "release", "stage");
-  const zip = path.join(root, "release", `claude-asker-v${manifest.version}.zip`);
+  const zip = path.join(root, "release", `model-asker-v${manifest.version}.zip`);
   fs.rmSync(stage, { recursive: true, force: true });
   fs.mkdirSync(path.join(stage, "host"), { recursive: true });
   fs.cpSync(outDir, path.join(stage, "extension"), { recursive: true });

@@ -1,4 +1,4 @@
-# Plano de Estudo — Claude Asker
+# Plano de Estudo — Model Asker
 
 Extensão de navegador (Chrome / Brave / Edge / Opera — todos baseados em Chromium) que:
 1. ao clicar no ícone (ou `Alt+Shift+S`) entra em **modo print**;

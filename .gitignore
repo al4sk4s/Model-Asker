@@ -6,5 +6,6 @@ release/
 config/dev.json
 
 # Gerados pelo host/install.ps1 com caminhos da sua máquina
-host/claude_asker_host.bat
-host/com.claude_asker.host.json
+host/model_asker_host.bat
+host/com.model_asker.host.json
+logs/
