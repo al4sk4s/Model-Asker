@@ -83,7 +83,9 @@ if (target === "release") {
   for (const file of ["host.js", "extension-id.mjs", "install.ps1", "uninstall.ps1"]) {
     fs.copyFileSync(path.join(root, "host", file), path.join(stage, "host", file));
   }
-  fs.copyFileSync(path.join(root, "README.md"), path.join(stage, "README.md"));
+  for (const file of ["README.md", "README.pt-BR.md"]) {
+    fs.copyFileSync(path.join(root, file), path.join(stage, file));
+  }
   // O host é ESM; sem package.json ao lado o Node o trataria como CommonJS.
   fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({ type: "module", private: true }, null, 2));
   fs.rmSync(zip, { force: true });

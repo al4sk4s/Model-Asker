@@ -21,7 +21,7 @@
   const READING_ATTR = "data-model-asker-reading";
   // Botões só saem se o texto for um comando típico de navegação/plataforma.
   const UI_COMMAND =
-    /^(pr[óo]xim[ao]( quest[ãa]o| p[áa]gina)?|anterior|voltar|avan[çc]ar|continuar|enviar( respostas?| prova)?|salvar|limpar( sele[çc][ãa]o| resposta)?|(des)?marcar( para revis[ãa]o)?|pular|finalizar( prova| tentativa)?|concluir|confirmar|cancelar|fechar|sair|menu|ajuda|next|previous|prev|back|submit|save|clear( selection)?|skip|finish|flag|review|close|[‹›«»<>←→]+)[\s.!:‹›«»<>←→]*$/i;
+    /^(pr[óo]xim[ao]( quest[ãa]o| p[áa]gina)?|anterior|voltar|avan[çc]ar|continuar|enviar( respostas?| prova)?|salvar|limpar( sele[çc][ãa]o| resposta)?|(des)?marcar( para revis[ãa]o)?|pular|finalizar( prova| tentativa)?|concluir|confirmar|cancelar|fechar|sair|menu|ajuda|next|previous|prev|back|submit|save|clear( selection)?|skip|finish|flag|review|close|siguiente|atr[áa]s|volver|guardar|borrar|omitir|terminar|finalizar intento|cerrar|[‹›«»<>←→]+)[\s.!:‹›«»<>←→]*$/i;
   const UI_BUTTONS = "button, [role=button], input[type=button], input[type=submit], input[type=reset]";
   // Blocos de interface pela função declarada (role) ou pelo nome (classe/id).
   const UI_BLOCKS =
@@ -31,6 +31,13 @@
   const ANSWER_LIKE =
     "input[type=radio], input[type=checkbox], label, [role=radio], [role=option], [role=checkbox], [role=menuitemradio], select";
   const ALTERNATIVE_TEXT = /^\(?[a-e1-9][).:\-–]\s/i;
+
+  // Idioma da interface (i18n.js é injetado antes deste arquivo).
+  const I18N = globalThis.MODEL_ASKER_I18N;
+  let lang = I18N.resolveLanguage(globalThis.MODEL_ASKER_DEFAULTS.language);
+  const t = (key, vars) => I18N.translate(lang, key, vars);
+  const fmt = (n) => n.toLocaleString(I18N.LOCALES[lang]);
+  chrome.storage.local.get({ language: "auto" }).then(({ language }) => setLanguage(language));
 
   let overlayHost = null;
   let picker = null;
@@ -52,7 +59,7 @@
         panel.before = null;
         panel.meta = { ...panel.meta, ...msg.meta, plan: msg.meta?.plan ?? panel.meta?.plan ?? null };
         renderUsage();
-        setStatus("Analisando…", true);
+        setStatus(t("statusAnalyzing"), true);
         break;
       case "usage-update":
         // A leitura do início não pode sobrescrever a feita após a resposta.
@@ -65,15 +72,15 @@
         break;
       case "answer-reset":
         setAnswer("");
-        setStatus("Reencaminhado para outro modelo…", true);
+        setStatus(t("statusRerouted"), true);
         break;
       case "answer-delta":
-        if (!panel.text) setStatus("Respondendo…", true);
+        if (!panel.text) setStatus(t("statusAnswering"), true);
         setAnswer(panel.text + msg.text);
         panel.answer.scrollTop = panel.answer.scrollHeight;
         break;
       case "answer-done":
-        setStatus([msg.note || "Pronto", pendingNotice].filter(Boolean).join(" · "), false);
+        setStatus([msg.note || t("statusDone"), pendingNotice].filter(Boolean).join(" · "), false);
         panel.finished = true;
         if (msg.usage) {
           const { input, cached = 0, output, thinking = 0 } = msg.usage;
@@ -92,7 +99,34 @@
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.headerColor && panel) applyHeaderColor(changes.headerColor.newValue);
     if (changes.highlightColor && picker) applyHighlightColor(changes.highlightColor.newValue);
+    if (changes.language) setLanguage(changes.language.newValue);
   });
+
+  // Troca o idioma na hora, inclusive com o painel aberto.
+  function setLanguage(setting) {
+    lang = I18N.resolveLanguage(setting);
+    if (!panel) return;
+    panel.copyButton.textContent = t("copy");
+    panel.copyButton.title = t("copyTitle");
+    panel.closeButton.title = t("close");
+    panel.color.title = t("headerColorTitle");
+    renderUsage();
+  }
+
+  function escapeHtml(text) {
+    return text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  }
+
+  function areaHint() {
+    const kbd = (key) => `<kbd>${key}</kbd>`;
+    // As marcas {up}, {down}... passam intactas pela tradução e viram teclas aqui.
+    const marks = { up: "{up}", down: "{down}", enter: "{enter}", esc: "{esc}" };
+    return escapeHtml(t("hintArea", marks))
+      .replace("{up}", kbd("↑"))
+      .replace("{down}", kbd("↓"))
+      .replace("{enter}", kbd("Enter"))
+      .replace("{esc}", kbd("Esc"));
+  }
 
   // ---------- Modo print ----------
 
@@ -117,7 +151,7 @@
       </style>
       <div class="layer"></div>
       <div class="box"></div>
-      <div class="hint">Arraste para selecionar a questão — Esc para cancelar</div>`;
+      <div class="hint">${escapeHtml(t("hintPrint"))}</div>`;
     document.documentElement.appendChild(overlayHost);
 
     const layer = root.querySelector(".layer");
@@ -215,7 +249,7 @@
         }
       </style>
       <div class="box"><span class="tag"></span></div>
-      <div class="hint">Clique na área com as questões · <kbd>↑</kbd> amplia · <kbd>↓</kbd> reduz · <kbd>Enter</kbd> confirma · <kbd>Esc</kbd> cancela</div>`;
+      <div class="hint">${areaHint()}</div>`;
     document.documentElement.appendChild(overlayHost);
 
     picker = {
@@ -313,7 +347,7 @@
     if (picker.measured !== el) {
       picker.measured = el;
       const tokens = estimateTokens(extractAreaText(el).text);
-      picker.tag.textContent = `${describe(el)} · ≈${tokens.toLocaleString("pt-BR")} tokens`;
+      picker.tag.textContent = `${describe(el)} · ${t("tagTokens", { n: fmt(tokens) })}`;
     }
   }
 
@@ -325,7 +359,7 @@
 
     const { text, skipped, rawChars, guard } = extractAreaText(el);
     if (!text) {
-      showError("Essa área não tem texto. Para questões em imagem, use o modo print.");
+      showError(t("errNoText"));
       return;
     }
     const images = [...el.querySelectorAll("img, svg, canvas, video")].filter((node) => {
@@ -333,8 +367,8 @@
       return r.width >= 48 && r.height >= 48;
     }).length;
     pendingNotice = [
-      skipped && `${skipped} item(ns) de interface ignorado(s)`,
-      images && `${images} imagem(ns) na área não foram enviadas — para figuras use o modo print`,
+      skipped && t("noticeSkipped", { n: skipped }),
+      images && t("noticeImages", { n: images }),
     ]
       .filter(Boolean)
       .join(" · ");
@@ -456,7 +490,7 @@
       }
       if (!line && prev !== undefined && /^[a-e][.)]$/i.test(prev)) continue;
       // Cabeçalho "Questão N" repetido (o Moodle repete antes das alternativas).
-      if (/^questão \d+$/i.test(line) && out.slice(-8).includes(line)) continue;
+      if (/^(questão|question|pregunta) \d+$/i.test(line) && out.slice(-8).includes(line)) continue;
       out.push(line);
     }
     return out
@@ -465,10 +499,18 @@
       .trim();
   }
 
-  // Rótulos de plataformas de prova (Moodle etc.) que ocupam uma linha inteira.
-  // Só a linha exata sai, então não atinge enunciados nem alternativas.
-  const LMS_UI_LINE =
-    /^(resposta salva|ainda não respondida|não respondida|vale \d+([.,]\d+)? ponto\(s\)\.?|marcar questão|remover marcação|texto da questão|limpar minha escolha)$/i;
+  // Rótulos de plataformas de prova (Moodle etc.) que ocupam uma linha inteira, em
+  // português, inglês e espanhol. Só a linha exata sai: não atinge enunciados nem alternativas.
+  const LMS_UI_LINE = new RegExp(
+    "^(" +
+      [
+        String.raw`resposta salva|ainda não respondida|não respondida|vale \d+([.,]\d+)? ponto\(s\)\.?|marcar questão|remover marcação|texto da questão|limpar minha escolha`,
+        String.raw`answer saved|not yet answered|marked out of \d+([.,]\d+)?|flag question|remove flag|question text|clear my choice`,
+        String.raw`respuesta guardada|sin responder aún|(se )?puntúa como \d+([.,]\d+)?( sobre \d+([.,]\d+)?)?|marcar pregunta|quitar marca|enunciado de la pregunta|quitar mi elección`,
+      ].join("|") +
+      ")$",
+    "i",
+  );
 
   // Fórmulas (MathJax e afins) aparecem duas vezes no texto: inteira numa linha e
   // quebrada em um símbolo por linha ("𝜋", ":", "3", "𝑥"...), mais pedaços de chave
@@ -525,7 +567,7 @@
   function showError(message) {
     showPanel();
     panel.finished = true;
-    setStatus("Erro", false);
+    setStatus(t("statusError"), false);
     panel.answer.classList.add("error");
     setAnswer(message);
   }
@@ -588,9 +630,9 @@
             <div class="meta"></div>
             <div class="usage"></div>
           </div>
-          <input class="color" type="color" title="Cor da barra de título">
-          <button class="copy" title="Copiar resposta">Copiar</button>
-          <button class="close" title="Fechar">✕</button>
+          <input class="color" type="color">
+          <button class="copy"></button>
+          <button class="close">✕</button>
         </div>
         <div class="status"></div>
         <div class="answer"></div>
@@ -606,12 +648,15 @@
       metaLine: root.querySelector(".meta"),
       usage: root.querySelector(".usage"),
       color: root.querySelector(".color"),
+      copyButton: root.querySelector(".copy"),
+      closeButton: root.querySelector(".close"),
       text: "",
       tokens: null,
       windows: null, // uso da conta agora
       before: null, // uso da conta antes da pergunta
       finished: false,
     };
+    setLanguage(lang);
 
     // A cor fica no storage: mudar aqui ou nas opções atualiza o painel e o seletor
     // na hora, em todas as abas.
@@ -621,13 +666,13 @@
       chrome.storage.local.set({ headerColor: panel.color.value });
     });
 
-    const copyButton = root.querySelector(".copy");
+    const { copyButton } = panel;
     copyButton.addEventListener("click", async () => {
       await navigator.clipboard.writeText(panel.text);
-      copyButton.textContent = "Copiado!";
-      setTimeout(() => (copyButton.textContent = "Copiar"), 1500);
+      copyButton.textContent = t("copied");
+      setTimeout(() => (copyButton.textContent = t("copy")), 1500);
     });
-    root.querySelector(".close").addEventListener("click", () => {
+    panel.closeButton.addEventListener("click", () => {
       host.style.display = "none";
     });
 
@@ -653,7 +698,7 @@
     );
   }
 
-  const EFFORT_LABELS = { low: "baixo", medium: "médio", high: "alto", xhigh: "muito alto", max: "máximo" };
+  const EFFORT_KEYS = { low: "effortLow", medium: "effortMedium", high: "effortHigh", xhigh: "effortXhigh", max: "effortMax" };
 
   // "claude-opus-5-5" -> "Opus 5.5"
   function prettyModel(id) {
@@ -665,29 +710,30 @@
   // Linha 1: modelo · plano · esforço. Linha 2: tokens desta resposta e uso real
   // da conta (mesmos números do /usage do Claude), com quanto esta pergunta debitou.
   function renderUsage() {
-    const fmt = (n) => n.toLocaleString("pt-BR");
     const meta = panel.meta ?? {};
 
     const models = (meta.models?.length ? meta.models : [meta.model]).filter(Boolean).map(prettyModel);
-    const plan = meta.plan ? (meta.plan === "API" ? "API" : `plano ${meta.plan[0].toUpperCase()}${meta.plan.slice(1)}`) : "";
-    const effort = EFFORT_LABELS[meta.effort] ? `esforço ${EFFORT_LABELS[meta.effort]}` : "";
+    const plan = meta.plan
+      ? t("plan", { plan: meta.plan === "API" ? "API" : `${meta.plan[0].toUpperCase()}${meta.plan.slice(1)}` })
+      : "";
+    const effort = EFFORT_KEYS[meta.effort] ? t("effort", { level: t(EFFORT_KEYS[meta.effort]) }) : "";
     panel.metaLine.textContent = [models.join(" → "), plan, effort].filter(Boolean).join(" · ");
-    panel.metaLine.title = models.length > 1 ? "O primeiro modelo recusou e a resposta foi gerada pelo seguinte." : "";
+    panel.metaLine.title = models.length > 1 ? t("fallbackNote") : "";
 
     const items = [];
     const details = [];
     if (panel.tokens) {
-      const { input, cached, output, thinking } = panel.tokens;
-      // Tokens lidos do cache custam ~10%: o número que pesa é o de "novos".
-      items.push(`${fmt(input - cached + output)} tokens${cached ? ` +${fmt(cached)} cache` : ""}`);
+      const { input, output, thinking } = panel.tokens;
+      items.push(t("usageTokens", { n: fmt(input + output) }));
       details.push(
-        `Entrada: ${fmt(input)} (${fmt(cached)} do cache, custam ~10%)`,
-        `Saída: ${fmt(output)}${thinking ? ` (${fmt(thinking)} de raciocínio interno)` : ""}`,
-        "O peso no limite depende do modelo: Haiku custa bem menos por token que Opus.",
+        t("usageDetail", { input: fmt(input), output: fmt(output) }) +
+          (thinking ? t("usageThinking", { n: fmt(thinking) }) : ""),
+        t("usageModelWeight"),
       );
     }
+    const when = new Intl.DateTimeFormat(I18N.LOCALES[lang], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
     for (const w of panel.windows ?? []) {
-      const label = w.name === "session" ? "Sessão" : w.name.replace(/^week \(all models\)$/, "Semana").replace(/^week/, "Semana");
+      const label = w.name === "session" ? t("session") : t("week");
       const prev = panel.before?.find((b) => b.name === w.name);
       // O Claude informa o uso em % inteiros: gastos menores que 1% aparecem como "<1%".
       // Uma queda significa que a janela renovou no meio; aí não há como medir.
@@ -697,12 +743,14 @@
         if (diff > 0) debit = ` (+${diff}%)`;
         else if (diff === 0) debit = " (+<1%)";
       }
-      items.push(`${label}: ${w.used}%${debit}`);
+      items.push(t("usedShort", { label, n: w.used }) + debit);
       details.push(
-        `${label}: ${w.used}% usado${prev ? ` (antes: ${prev.used}%)` : ""}${w.resets ? ` — renova ${w.resets}` : ""}`,
+        t("usedLong", { label, n: w.used }) +
+          (prev ? t("usedBefore", { n: prev.used }) : "") +
+          (w.resetsAt ? t("resets", { when: when.format(new Date(w.resetsAt)) }) : ""),
       );
     }
-    if (panel.before && panel.finished) details.push("Entre parênteses: quanto esta pergunta debitou do seu limite.");
+    if (panel.before && panel.finished) details.push(t("debitNote"));
 
     // Espaços não separáveis: a linha só quebra entre itens, nunca no meio de um.
     panel.usage.textContent = items.map((item) => item.replace(/ /g, " ").replace("+<", "+⁠<")).join(" · ");

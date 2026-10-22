@@ -64,7 +64,7 @@ function subscriptionEnv() {
 }
 
 // Uso real da conta, o mesmo do comando /usage do Claude Code (não gasta tokens).
-// Devolve [{ name: "session", used: 25, resets: "Oct 22, 4:50am" }, ...] ou null.
+// Devolve [{ name: "session", used: 25, resetsAt: <ms> }, ...] ou null.
 function fetchPlanUsage() {
   return new Promise((resolve) => {
     const proc = spawn(
@@ -82,7 +82,7 @@ function fetchPlanUsage() {
         const windows = [...text.matchAll(/^Current (.+?): (\d+)% used(?: · resets (.+))?$/gm)].map((m) => ({
           name: m[1],
           used: Number(m[2]),
-          resets: toPortuguese((m[3] ?? "").replace(/\s*\(.*\)\s*$/, "")),
+          resetsAt: parseReset((m[3] ?? "").replace(/\s*\(.*\)\s*$/, "")),
         }));
         if (!windows.length) log(`/usage sem dados reconhecíveis: ${text}`);
         resolve(windows.length ? windows : null);
@@ -218,15 +218,19 @@ function fetchPlanType() {
   });
 }
 
-// "Oct 22, 4:49am" -> "22 out, 04:49" (mantém o texto original se o formato for outro).
-function toPortuguese(text) {
-  const months = { Jan: "jan", Feb: "fev", Mar: "mar", Apr: "abr", May: "mai", Jun: "jun",
-    Jul: "jul", Aug: "ago", Sep: "set", Oct: "out", Nov: "nov", Dec: "dez" };
+// "Oct 22, 4:49am" (ou só "4:49am" = hoje), no fuso local -> data em milissegundos,
+// para a extensão formatar no idioma escolhido. null se o formato for outro.
+function parseReset(text) {
   const m = text.match(/^(?:([A-Z][a-z]{2}) (\d+), )?(\d+)(?::(\d+))?(am|pm)$/);
-  if (!m) return text;
+  if (!m) return null;
+  const now = new Date();
+  const month = m[1] ? "JanFebMarAprMayJunJulAugSepOctNovDec".indexOf(m[1]) / 3 : now.getMonth();
+  const day = m[2] ? Number(m[2]) : now.getDate();
   const hour = (Number(m[3]) % 12) + (m[5] === "pm" ? 12 : 0);
-  const time = `${String(hour).padStart(2, "0")}:${m[4] ?? "00"}`;
-  return m[1] ? `${m[2]} ${months[m[1]] ?? m[1]}, ${time}` : `hoje, ${time}`;
+  const date = new Date(now.getFullYear(), month, day, hour, Number(m[4] ?? 0));
+  // Renovação em janeiro vista em dezembro: é do ano seguinte.
+  if (date < now - 24 * 3600 * 1000) date.setFullYear(date.getFullYear() + 1);
+  return date.getTime();
 }
 
 function handle(message) {
@@ -289,14 +293,15 @@ function handle(message) {
   child.on("error", (err) => {
     log(`falha ao iniciar ${CLAUDE_BIN}: ${err.message}`);
     trace?.end({ error: err.message });
-    finish({ type: "error", message: `Não consegui iniciar o Claude Code (${err.message}). Rode host/install.ps1 de novo.` });
+    // Erros vão como códigos; a extensão traduz para o idioma escolhido.
+    finish({ type: "error", code: "spawn", detail: err.message });
   });
 
   child.on("exit", (code) => {
     if (gotResult) return;
     log(`claude saiu com código ${code}: ${stderrText}`);
     trace?.end({ error: `código ${code}`, stderr: stderrText });
-    finish({ type: "error", message: stderrText.trim() || `O Claude Code encerrou com código ${code}.` });
+    finish({ type: "error", code: "exit", detail: stderrText.trim() || String(code) });
   });
 
   function onEvent(event) {
@@ -317,22 +322,22 @@ function handle(message) {
         .map(([name, win]) => ({
           name,
           used: Math.round(win.utilization * 100),
-          resets: win.resetsAt ? new Date(win.resetsAt * 1000).toLocaleString("pt-BR") : "",
+          resetsAt: win.resetsAt ? win.resetsAt * 1000 : null,
         }));
     } else if (event.type === "result") {
       gotResult = true;
       if (event.is_error || event.subtype !== "success") {
         log(`erro do Claude Code: ${JSON.stringify(event)}`);
         trace?.end({ error: event.result });
-        finish({ type: "error", message: event.result || "O Claude Code retornou um erro." });
+        finish({ type: "error", code: "cli", detail: event.result || "" });
         return;
       }
       const u = event.usage ?? {};
-      const note = event.stop_reason === "max_tokens" ? "Resposta cortada (limite de tamanho atingido)." : undefined;
+      const truncated = event.stop_reason === "max_tokens";
       // Avisa na hora que a resposta acabou; o uso atualizado da conta vem logo depois.
       send({
         type: "done",
-        note,
+        truncated,
         usage: {
           input: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
           // Parte da entrada lida do cache: custa ~10% do normal.

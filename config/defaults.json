@@ -7,5 +7,6 @@
   "effort": "medium",
   "style": "direct",
   "extra": "",
-  "headerColor": "#7c3aed"
+  "headerColor": "#7c3aed",
+  "language": "auto"
 }

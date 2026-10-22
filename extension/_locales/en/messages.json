@@ -1,0 +1,5 @@
+{
+  "extDescription": { "message": "Select a question on the page and an AI model answers it in a side panel." },
+  "actionTitle": { "message": "Model Asker — select a question (Alt+Shift+S)" },
+  "commandDescription": { "message": "Start selecting a question" }
+}

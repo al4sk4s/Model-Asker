@@ -1,6 +1,9 @@
 // Service worker da extensão. Este arquivo é empacotado pelo esbuild
 // (npm run build) em extension/background.js junto com o SDK da Anthropic.
 import Anthropic from "@anthropic-ai/sdk";
+import "../extension/i18n.js";
+
+const I18N = globalThis.MODEL_ASKER_I18N;
 
 // Padrões das configurações: vêm de config/defaults.json (+ config/dev.json no
 // build dev), injetados pelo build.mjs.
@@ -10,11 +13,12 @@ import Anthropic from "@anthropic-ai/sdk";
 const DEFAULTS = __DEFAULTS__;
 
 // Instruções curtas: o raciocínio acontece no pensamento interno do modelo
-// (que garante a precisão); o texto visível fica só com o necessário.
+// (que garante a precisão); o texto visível fica só com o necessário. O idioma
+// da resposta é acrescentado no fim, conforme a opção "Idioma".
 const BASE_PROMPT =
   "Você recebe uma ou mais questões (imagem de tela ou texto extraído de uma página). Resolva " +
-  "com cuidado e confira o resultado antes de responder. Responda em português, sem introdução, " +
-  "sem repetir o enunciado e sem comentários finais. Várias questões: uma linha por questão " +
+  "com cuidado e confira o resultado antes de responder. Sem introdução, sem repetir o enunciado " +
+  "e sem comentários finais. Várias questões: uma linha por questão " +
   "(ex.: \"1) C\"). Conteúdo ilegível ou incompleto: diga isso em uma frase.";
 
 const STYLE_PROMPTS = {
@@ -46,10 +50,20 @@ const MAX_PNG_BYTES = 3.5 * 1024 * 1024;
 // Uso da conta lido ao entrar no modo de seleção, por aba (promessa do host).
 const usageSnapshots = new Map();
 
-const MODE_LABELS = {
-  print: "Modo print (recortar imagem)",
-  element: "Modo área (enviar texto do HTML)",
-};
+const MODE_LABELS = { print: "menuPrint", element: "menuArea" };
+
+// Idioma escolhido nas opções ("auto" = o do navegador).
+async function currentLanguage() {
+  const { language } = await chrome.storage.local.get({ language: DEFAULTS.language });
+  return I18N.resolveLanguage(language);
+}
+
+async function updateMenuTitles() {
+  const lang = await currentLanguage();
+  for (const [mode, key] of Object.entries(MODE_LABELS)) {
+    chrome.contextMenus.update(mode, { title: I18N.translate(lang, key) });
+  }
+}
 
 // Clique direito no ícone: alterna entre os modos de captura.
 chrome.runtime.onInstalled.addListener(async () => {
@@ -64,8 +78,10 @@ chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.set(updates);
 
   const { captureMode } = await chrome.storage.local.get(DEFAULTS);
+  const lang = await currentLanguage();
   chrome.contextMenus.removeAll(() => {
-    for (const [mode, title] of Object.entries(MODE_LABELS)) {
+    for (const [mode, key] of Object.entries(MODE_LABELS)) {
+      const title = I18N.translate(lang, key);
       chrome.contextMenus.create({ id: mode, title, type: "radio", contexts: ["action"], checked: mode === captureMode });
     }
   });
@@ -79,6 +95,7 @@ chrome.contextMenus.onClicked.addListener(({ menuItemId }) => {
 chrome.storage.onChanged.addListener((changes) => {
   const mode = changes.captureMode?.newValue;
   if (mode in MODE_LABELS) chrome.contextMenus.update(mode, { checked: true });
+  if (changes.language) updateMenuTitles();
 });
 
 // 1) Clique no ícone (ou Alt+Shift+S): injeta o content script e liga o modo escolhido.
@@ -90,7 +107,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 
   try {
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["defaults.js", "content.js"] });
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["defaults.js", "i18n.js", "content.js"] });
     if (captureMode === "element") {
       await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ["picker.css"] });
     }
@@ -134,6 +151,8 @@ async function solve(tab, buildContent) {
   // Chamar uma API da extensão periodicamente impede o service worker de ser
   // encerrado por inatividade enquanto o Claude ainda está pensando.
   const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(), 20_000);
+  const lang = await currentLanguage();
+  const t = (key, vars) => I18N.translate(lang, key, vars);
 
   try {
     // 3) Monta o conteúdo (print recortado ou texto da área) antes de mostrar o
@@ -141,7 +160,12 @@ async function solve(tab, buildContent) {
     const { mode, blocks, info } = await buildContent();
     const content = [...blocks, { type: "text", text: PROMPT }];
     const settings = await chrome.storage.local.get(DEFAULTS);
-    settings.instructions = [BASE_PROMPT, STYLE_PROMPTS[settings.style] ?? STYLE_PROMPTS.direct, settings.extra]
+    settings.instructions = [
+      BASE_PROMPT,
+      STYLE_PROMPTS[settings.style] ?? STYLE_PROMPTS.direct,
+      t("answerLanguage"),
+      settings.extra,
+    ]
       .filter(Boolean)
       .join("\n");
     send({
@@ -160,7 +184,7 @@ async function solve(tab, buildContent) {
       : null;
 
     if (settings.provider === "api") {
-      await solveWithApi(settings, content, send, debug);
+      await solveWithApi(settings, content, send, debug, t);
     } else {
       // Uso da conta antes da pergunta: a foto tirada ao entrar no modo de seleção
       // (ou uma leitura agora, se ela se perdeu). Já aparece no painel.
@@ -173,18 +197,18 @@ async function solve(tab, buildContent) {
         const snapshot = await Promise.race([before.catch(() => null), new Promise((r) => setTimeout(r, 3000))]);
         debug.before = snapshot?.windows ?? null;
       }
-      await solveWithSubscription(settings, content, send, before, debug);
+      await solveWithSubscription(settings, content, send, before, debug, t);
     }
   } catch (err) {
     console.error("Model Asker:", err);
-    send({ type: "answer-error", message: describeError(err) });
+    send({ type: "answer-error", message: describeError(err, t) });
   } finally {
     clearInterval(keepAlive);
   }
 }
 
 // Modo assinatura: conversa com host/host.js, que roda o Claude Code logado no seu plano.
-function solveWithSubscription(settings, content, send, before, debug) {
+function solveWithSubscription(settings, content, send, before, debug, t) {
   return new Promise((resolve, reject) => {
     const port = chrome.runtime.connectNative(NATIVE_HOST);
     let finished = false;
@@ -194,7 +218,7 @@ function solveWithSubscription(settings, content, send, before, debug) {
         send({ type: "answer-delta", text: msg.text });
       } else if (msg.type === "done") {
         finished = true;
-        send({ type: "answer-done", note: msg.note, usage: msg.usage });
+        send({ type: "answer-done", note: msg.truncated ? t("statusTruncated") : undefined, usage: msg.usage });
         resolve();
       } else if (msg.type === "usage") {
         // Uso real da conta lido logo após a resposta, comparado com o de antes.
@@ -207,7 +231,12 @@ function solveWithSubscription(settings, content, send, before, debug) {
       } else if (msg.type === "error") {
         finished = true;
         port.disconnect();
-        reject(new Error(msg.message));
+        const errors = {
+          spawn: () => t("errSpawn", { message: msg.detail }),
+          exit: () => (/^\d+$/.test(msg.detail) ? t("errExit", { code: msg.detail }) : msg.detail),
+          cli: () => msg.detail || t("errCli"),
+        };
+        reject(new Error((errors[msg.code] ?? errors.cli)()));
       }
     });
 
@@ -216,9 +245,7 @@ function solveWithSubscription(settings, content, send, before, debug) {
       const reason = chrome.runtime.lastError?.message ?? "";
       reject(
         new Error(
-          /not found|not exist/i.test(reason)
-            ? "Host do Claude Code não instalado. Rode host\\install.ps1 (veja o README)."
-            : `A conexão com o Claude Code caiu. ${reason}`,
+          /not found|not exist/i.test(reason) ? t("errHostMissing") : t("errHostDropped", { reason }),
         ),
       );
     });
@@ -248,7 +275,7 @@ function askHost(request) {
 }
 
 // Modo chave de API: chama a API da Anthropic direto do navegador (cobrança por uso).
-async function solveWithApi(settings, content, send, debug) {
+async function solveWithApi(settings, content, send, debug, t) {
   const client = new Anthropic({ apiKey: settings.apiKey, dangerouslyAllowBrowser: true });
   const params = {
     model: settings.model,
@@ -284,9 +311,9 @@ async function solveWithApi(settings, content, send, debug) {
     models: [message.model],
   };
   if (message.stop_reason === "refusal") {
-    send({ type: "answer-error", message: "O Claude não pôde responder a esta solicitação." });
+    send({ type: "answer-error", message: t("errRefusal") });
   } else if (message.stop_reason === "max_tokens") {
-    send({ type: "answer-done", note: "Resposta cortada (limite de tamanho atingido).", usage });
+    send({ type: "answer-done", note: t("statusTruncated"), usage });
   } else {
     send({ type: "answer-done", usage });
   }
@@ -371,21 +398,11 @@ function toBase64(buffer) {
   return btoa(binary);
 }
 
-function describeError(err) {
-  if (err instanceof Anthropic.AuthenticationError) {
-    return "Chave da API inválida. Confira nas opções da extensão.";
-  }
-  if (err instanceof Anthropic.PermissionDeniedError) {
-    return "Sua chave não tem permissão para usar este modelo.";
-  }
-  if (err instanceof Anthropic.RateLimitError) {
-    return "Limite de uso atingido. Aguarde um pouco e tente de novo.";
-  }
-  if (err instanceof Anthropic.APIConnectionError) {
-    return "Falha de conexão com a API. Verifique sua internet.";
-  }
-  if (err instanceof Anthropic.APIError) {
-    return `Erro da API (${err.status ?? "?"}): ${err.message}`;
-  }
+function describeError(err, t) {
+  if (err instanceof Anthropic.AuthenticationError) return t("errInvalidKey");
+  if (err instanceof Anthropic.PermissionDeniedError) return t("errPermission");
+  if (err instanceof Anthropic.RateLimitError) return t("errRateLimit");
+  if (err instanceof Anthropic.APIConnectionError) return t("errConnection");
+  if (err instanceof Anthropic.APIError) return t("errApi", { status: err.status ?? "?", message: err.message });
   return err?.message ?? String(err);
 }

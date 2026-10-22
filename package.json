@@ -1,8 +1,8 @@
 {
   "name": "model-asker",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "private": true,
-  "description": "Extensão de navegador: recorte uma área da tela e o Claude resolve a questão.",
+  "description": "Browser extension: select a question on the page and an AI model answers it.",
   "type": "module",
   "scripts": {
     "build": "node build.mjs public",

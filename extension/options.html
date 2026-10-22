@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="color-scheme" content="light dark">
-  <title>Model Asker — Configurações</title>
+  <title data-i18n="optTitle">Model Asker</title>
   <link rel="icon" href="icons/icon32.png">
   <style>
     :root {
@@ -70,99 +70,104 @@
       <img src="icons/icon128.png" alt="">
       <div>
         <h1>Model Asker</h1>
-        <p>Selecione uma questão na página e o Claude responde. As alterações são salvas automaticamente.</p>
+        <p data-i18n="optSubtitle"></p>
       </div>
     </header>
 
     <section>
-      <h2>Conexão</h2>
+      <h2 data-i18n="secConnection"></h2>
       <div class="field">
-        <label for="provider">Como acessar o Claude</label>
+        <label for="provider" data-i18n="providerLabel"></label>
         <select id="provider">
-          <option value="subscription">Minha assinatura (Pro/Max) via Claude Code</option>
-          <option value="api">Chave de API (cobrança por uso)</option>
+          <option value="subscription" data-i18n="providerSub"></option>
+          <option value="api" data-i18n="providerApi"></option>
         </select>
         <span class="hint" id="providerHelp"></span>
       </div>
       <div class="field" id="apiKeyField">
-        <label for="apiKey">Chave da API Anthropic</label>
+        <label for="apiKey" data-i18n="apiKeyLabel"></label>
         <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off">
-        <div class="warn" id="apiWarn">A chave fica só neste navegador. Não publique a extensão com ela dentro.</div>
+        <div class="warn" id="apiWarn" data-i18n="apiWarn"></div>
       </div>
     </section>
 
     <section>
-      <h2>Captura</h2>
+      <h2 data-i18n="secCapture"></h2>
       <div class="field">
-        <label for="captureMode">Modo</label>
+        <label for="captureMode" data-i18n="modeLabel"></label>
         <select id="captureMode">
-          <option value="print">Print — arrasta um retângulo, envia como imagem</option>
-          <option value="element">Área do HTML — clica num bloco, envia só o texto</option>
+          <option value="print" data-i18n="modePrint"></option>
+          <option value="element" data-i18n="modeArea"></option>
         </select>
-        <span class="hint">O modo área costuma gastar bem menos tokens, mas não envia figuras.
-          Também dá para trocar pelo botão direito no ícone.</span>
+        <span class="hint" data-i18n="modeHint"></span>
       </div>
       <div class="field row" id="highlightField">
         <div>
-          <span class="field-label">Cor do destaque da área</span>
-          <span class="hint">Aplicada com transparência sobre o bloco sob o mouse.</span>
+          <span class="field-label" data-i18n="highlightLabel"></span>
+          <span class="hint" data-i18n="highlightHint"></span>
         </div>
-        <input id="highlightColor" type="color" aria-label="Cor do destaque da área">
+        <input id="highlightColor" type="color" data-i18n-aria="highlightLabel">
       </div>
     </section>
 
     <section>
-      <h2>Resposta</h2>
+      <h2 data-i18n="secAnswer"></h2>
       <div class="field">
-        <label for="model">Modelo</label>
+        <label for="model" data-i18n="modelLabel"></label>
         <select id="model">
-          <option value="claude-opus-5-5">Claude Opus 5.5 — o mais preciso</option>
-          <option value="claude-sonnet-5-5">Claude Sonnet 5.5 — equilibrado</option>
-          <option value="claude-haiku-5-5">Claude Haiku 5.5 — o mais barato</option>
+          <option value="claude-opus-5-5" data-i18n="modelOpus"></option>
+          <option value="claude-sonnet-5-5" data-i18n="modelSonnet"></option>
+          <option value="claude-haiku-5-5" data-i18n="modelHaiku"></option>
         </select>
         <span class="hint" id="modelHelp"></span>
       </div>
       <div class="field">
-        <label for="effort">Esforço de raciocínio</label>
+        <label for="effort" data-i18n="effortLabel"></label>
         <select id="effort">
-          <option value="low">Baixo</option>
-          <option value="medium">Médio</option>
-          <option value="high">Alto</option>
-          <option value="xhigh">Muito alto</option>
+          <option value="low" data-i18n="effortOptLow"></option>
+          <option value="medium" data-i18n="effortOptMedium"></option>
+          <option value="high" data-i18n="effortOptHigh"></option>
+          <option value="xhigh" data-i18n="effortOptXhigh"></option>
         </select>
-        <span class="hint">Mais esforço = mais raciocínio interno (mais tokens), mais cuidado em questões difíceis.</span>
+        <span class="hint" data-i18n="effortHint"></span>
       </div>
       <div class="field">
-        <label for="style">Estilo da resposta</label>
+        <label for="style" data-i18n="styleLabel"></label>
         <select id="style">
-          <option value="direct">Só a resposta (menos tokens)</option>
-          <option value="short">Resposta + justificativa de uma frase</option>
-          <option value="steps">Passos essenciais + resposta</option>
+          <option value="direct" data-i18n="styleDirect"></option>
+          <option value="short" data-i18n="styleShort"></option>
+          <option value="steps" data-i18n="styleSteps"></option>
         </select>
       </div>
       <div class="field">
-        <label for="extra">Instruções extras <span class="hint" style="display:inline">(opcional)</span></label>
-        <textarea id="extra" placeholder="Ex.: as questões são de física do ensino médio."></textarea>
-        <span class="hint">Vai junto em toda pergunta — mantenha curto.</span>
+        <label for="extra"><span data-i18n="extraLabel"></span> <span class="hint" style="display:inline" data-i18n="optional"></span></label>
+        <textarea id="extra" data-i18n-placeholder="extraPlaceholder"></textarea>
+        <span class="hint" data-i18n="extraHint"></span>
       </div>
     </section>
 
     <section>
-      <h2>Aparência</h2>
+      <h2 data-i18n="secAppearance"></h2>
       <div class="field row">
         <div>
-          <span class="field-label">Cor da barra de título</span>
-          <span class="hint">Também dá para trocar pela bolinha na barra do painel. O tema claro/escuro segue o navegador.</span>
+          <span class="field-label" data-i18n="headerColorLabel"></span>
+          <span class="hint" data-i18n="headerColorHint"></span>
         </div>
-        <input id="headerColor" type="color" aria-label="Cor da barra de título">
+        <input id="headerColor" type="color" data-i18n-aria="headerColorLabel">
+      </div>
+      <div class="field">
+        <label for="language" data-i18n="languageLabel"></label>
+        <select id="language"></select>
+        <span class="hint" data-i18n="languageHint"></span>
       </div>
     </section>
 
-    <footer>Atalho: <strong>Alt+Shift+S</strong> · <a href="https://github.com/al4sk4s/Model-Asker" target="_blank">GitHub</a></footer>
+    <footer><span data-i18n="shortcut"></span>: <strong>Alt+Shift+S</strong> · <a href="https://github.com/al4sk4s/Model-Asker" target="_blank">GitHub</a></footer>
   </main>
-  <div class="toast" id="toast">Salvo</div>
+  <div class="toast" id="toast" data-i18n="saved"></div>
 
   <script src="defaults.js"></script>
+  <script src="i18n.js"></script>
   <script src="options.js"></script>
 </body>
 </html>
