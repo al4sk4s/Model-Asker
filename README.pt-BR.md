@@ -16,7 +16,7 @@ Extensão para Chrome, Edge e Brave que usa a sua **assinatura Claude Pro/Max** 
 <br>
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-a78bfa)
 ![Navegadores](https://img.shields.io/badge/Chrome%20·%20Edge%20·%20Brave-suportados-a78bfa)
-![Plataforma](https://img.shields.io/badge/plataforma-Windows-a78bfa)
+![Plataforma](https://img.shields.io/badge/plataforma-Windows%20·%20Linux-a78bfa)
 ![Idiomas](https://img.shields.io/badge/interface-EN%20·%20PT--BR%20·%20ES-a78bfa)
 
 [English](README.md) · **Português**
@@ -72,16 +72,50 @@ flowchart LR
 
 ## 🚀 Começando
 
-> **Pré-requisitos:** Windows 10/11 · [Node.js](https://nodejs.org) 18+ · [Claude Code](https://claude.com/claude-code) logado (rode `claude` uma vez no terminal) · Chrome, Edge ou Brave.
-> Vai usar só chave de API? O Claude Code e o passo 2 são opcionais.
+> **Pré-requisitos:** Windows 10/11 ou Linux · [Node.js](https://nodejs.org) 18+ · [Claude Code](https://claude.com/claude-code) logado (rode `claude` uma vez no terminal) · Chrome, Chromium, Edge, Brave ou Vivaldi.
+> Vai usar só chave de API? O Claude Code e a instalação do host são opcionais.
 
-1. **Baixe** o `model-asker-vX.Y.Z.zip` em [**Releases**](../../releases/latest) e extraia numa pasta fixa.
-2. **Instale o host** — abra o PowerShell nessa pasta e rode:
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File host\install.ps1
-   ```
-3. **Carregue a extensão** — `chrome://extensions` → ative o **Modo do desenvolvedor** → **Carregar sem compactação** → pasta `extension`.
-4. **Reinicie o navegador**, abra qualquer página e aperte **Alt+Shift+S**.
+<table>
+<tr><th width="50%">🪟 Windows</th><th width="50%">🐧 Linux (Arch e outros)</th></tr>
+<tr><td valign="top">
+
+**1. Baixe** o `model-asker-vX.Y.Z.zip` em [Releases](../../releases/latest) e extraia numa pasta fixa.
+
+**2. Instale o host** — no PowerShell, dentro dessa pasta:
+```powershell
+powershell -ExecutionPolicy Bypass -File host\install.ps1
+```
+Ele registra o host para Chrome, Edge e Brave (só para o seu usuário, em `HKEY_CURRENT_USER`).
+
+</td><td valign="top">
+
+**0. Pré-requisitos** (Arch):
+```bash
+sudo pacman -S nodejs npm unzip
+curl -fsSL https://claude.ai/install.sh | bash
+claude   # faça login uma vez
+```
+Navegador do pacman/AUR, ex.: `chromium`, `google-chrome`, `brave-bin`.
+
+**1. Baixe e extraia** numa pasta fixa:
+```bash
+mkdir -p ~/.local/share/model-asker && cd $_
+unzip ~/Downloads/model-asker-vX.Y.Z.zip
+```
+
+**2. Instale o host:**
+```bash
+sh host/install.sh
+```
+Ele registra o host para cada perfil de navegador que encontrar em `~/.config` (Chrome, Chromium, Brave, Edge, Vivaldi).
+
+</td></tr>
+</table>
+
+**3. Carregue a extensão** — `chrome://extensions` → ative o **Modo do desenvolvedor** → **Carregar sem compactação** → pasta `extension`.
+**4. Reinicie o navegador**, abra qualquer página e aperte **Alt+Shift+S**.
+
+> Mudou a pasta de lugar? Rode o instalador de novo. Para remover: `host\uninstall.ps1` (Windows) ou `sh host/uninstall.sh` (Linux).
 
 | Modo | Como usar |
 |---|---|
@@ -158,7 +192,8 @@ Escolhendo o modelo: **Opus · baixo** é um ótimo padrão. O **Haiku** deu as 
 
 <br>
 
-- Só Windows (o host usa PowerShell e o registro). A extensão em si funciona em qualquer Chromium.
+- Só Windows e Linux (ainda sem instalador para macOS). A extensão em si funciona em qualquer Chromium.
+- Linux: navegadores **Flatpak/Snap** rodam isolados e não conseguem iniciar o host — use a versão do pacman/AUR (ou .deb/.rpm).
 - Não funciona em páginas internas (`chrome://`, Web Store, visualizador de PDF nativo) — o ícone mostra um "!" vermelho.
 - O modo print captura só a parte visível da aba.
 - O modo área não envia imagens/figuras (o painel avisa) e não seleciona dentro de iframes.
@@ -172,7 +207,7 @@ Escolhendo o modelo: **Opus · baixo** é um ótimo padrão. O **Haiku** deu as 
 ```
 src/background.js     service worker (empacotado com o SDK da Anthropic pelo esbuild)
 extension/            arquivos da extensão (content script, opções, i18n, manifest, ícones)
-host/                 host Native Messaging + instalador
+host/                 host Native Messaging + instaladores (install.ps1 no Windows, install.sh no Linux)
 config/defaults.json  padrões públicos
 config/dev.json       SEUS padrões (ignorado pelo git) — copie de config/dev.example.json
 build.mjs             gera dist/public, dist/dev e o zip de release

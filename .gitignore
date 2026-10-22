@@ -9,3 +9,4 @@ config/dev.json
 host/model_asker_host.bat
 host/com.model_asker.host.json
 logs/
+host/model_asker_host.sh

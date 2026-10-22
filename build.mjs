@@ -80,7 +80,7 @@ if (target === "release") {
   fs.rmSync(stage, { recursive: true, force: true });
   fs.mkdirSync(path.join(stage, "host"), { recursive: true });
   fs.cpSync(outDir, path.join(stage, "extension"), { recursive: true });
-  for (const file of ["host.js", "extension-id.mjs", "install.ps1", "uninstall.ps1"]) {
+  for (const file of ["host.js", "extension-id.mjs", "install.ps1", "uninstall.ps1", "install.sh", "uninstall.sh"]) {
     fs.copyFileSync(path.join(root, "host", file), path.join(stage, "host", file));
   }
   for (const file of ["README.md", "README.pt-BR.md"]) {
