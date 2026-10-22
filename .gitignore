@@ -1,0 +1,10 @@
+node_modules/
+dist/
+release/
+
+# Configuração pessoal (build dev): chaves, preferências
+config/dev.json
+
+# Gerados pelo host/install.ps1 com caminhos da sua máquina
+host/claude_asker_host.bat
+host/com.claude_asker.host.json

@@ -1,0 +1,583 @@
+// Content script: roda dentro da página. Tem dois modos de captura —
+// "print" (retângulo vira imagem) e "área" (escolhe um bloco do HTML e envia
+// só o texto dele) — e o painel onde a resposta do Claude aparece.
+// Pode ser injetado várias vezes na mesma aba; só registra tudo na primeira.
+(() => {
+  if (window.__claudeAskerLoaded) return;
+  window.__claudeAskerLoaded = true;
+
+  const Z_TOP = "2147483647";
+  const MIN_SIZE = 8;
+  // defaults.js (gerado pelo build) é injetado antes deste arquivo.
+  const DEFAULT_HEADER_COLOR = globalThis.CLAUDE_ASKER_DEFAULTS.headerColor;
+  const DEFAULT_HIGHLIGHT_COLOR = globalThis.CLAUDE_ASKER_DEFAULTS.highlightColor;
+  // Classe no <html> que ativa o cursor de seleção (CSS em picker.css).
+  const PICKING_CLASS = "claude-asker-picking";
+  // Eventos de mouse bloqueados durante a seleção, para o site não reagir ao clique.
+  const BLOCKED_EVENTS = ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick", "auxclick", "contextmenu"];
+
+  let overlayHost = null;
+  let picker = null;
+  let panel = null;
+  let pendingNotice = "";
+
+  chrome.runtime.onMessage.addListener((msg) => {
+    switch (msg.type) {
+      case "start-selection":
+        if (msg.mode === "element") startElementPicker();
+        else startRegionSelection();
+        break;
+      case "answer-start":
+        showPanel();
+        setAnswer("");
+        panel.answer.classList.remove("error");
+        panel.finished = false;
+        panel.tokens = null;
+        panel.before = null;
+        panel.meta = { ...panel.meta, ...msg.meta, plan: msg.meta?.plan ?? panel.meta?.plan ?? null };
+        renderUsage();
+        setStatus("Analisando…", true);
+        break;
+      case "usage-update":
+        // A leitura do início não pode sobrescrever a feita após a resposta.
+        if (panel && (msg.final || !panel.finished)) {
+          panel.windows = msg.windows;
+          if (msg.before) panel.before = msg.before;
+          if (msg.plan) panel.meta = { ...panel.meta, plan: msg.plan };
+          renderUsage();
+        }
+        break;
+      case "answer-reset":
+        setAnswer("");
+        setStatus("Reencaminhado para outro modelo…", true);
+        break;
+      case "answer-delta":
+        if (!panel.text) setStatus("Respondendo…", true);
+        setAnswer(panel.text + msg.text);
+        panel.answer.scrollTop = panel.answer.scrollHeight;
+        break;
+      case "answer-done":
+        setStatus([msg.note || "Pronto", pendingNotice].filter(Boolean).join(" · "), false);
+        panel.finished = true;
+        if (msg.usage) {
+          panel.tokens = { input: msg.usage.input, output: msg.usage.output };
+          if (msg.usage.windows) panel.windows = msg.usage.windows;
+          if (msg.usage.models?.length) panel.meta = { ...panel.meta, models: msg.usage.models };
+        }
+        renderUsage();
+        break;
+      case "answer-error":
+        showError(msg.message);
+        break;
+    }
+  });
+
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes.headerColor && panel) applyHeaderColor(changes.headerColor.newValue);
+    if (changes.highlightColor && picker) applyHighlightColor(changes.highlightColor.newValue);
+  });
+
+  // ---------- Modo print ----------
+
+  function startRegionSelection() {
+    if (overlayHost) return;
+    pendingNotice = "";
+    if (panel) panel.host.style.display = "none"; // não aparecer no print
+
+    overlayHost = document.createElement("div");
+    Object.assign(overlayHost.style, { position: "fixed", inset: "0", zIndex: Z_TOP });
+    const root = overlayHost.attachShadow({ mode: "closed" });
+    root.innerHTML = `
+      <style>
+        :host { all: initial; }
+        .layer { position: fixed; inset: 0; cursor: crosshair; background: rgba(0,0,0,.25); user-select: none; }
+        .layer.dragging { background: transparent; }
+        .box { position: fixed; display: none; border: 2px dashed #d97757;
+               box-shadow: 0 0 0 9999px rgba(0,0,0,.35); pointer-events: none; }
+        .hint { position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+                background: #222; color: #fff; font: 13px system-ui, sans-serif;
+                padding: 8px 14px; border-radius: 6px; pointer-events: none; }
+      </style>
+      <div class="layer"></div>
+      <div class="box"></div>
+      <div class="hint">Arraste para selecionar a questão — Esc para cancelar</div>`;
+    document.documentElement.appendChild(overlayHost);
+
+    const layer = root.querySelector(".layer");
+    const box = root.querySelector(".box");
+    const hint = root.querySelector(".hint");
+    let start = null;
+    let rect = null;
+
+    layer.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      layer.setPointerCapture(e.pointerId);
+      start = { x: e.clientX, y: e.clientY };
+      layer.classList.add("dragging");
+      hint.style.display = "none";
+    });
+
+    layer.addEventListener("pointermove", (e) => {
+      if (!start) return;
+      rect = {
+        x: Math.min(start.x, e.clientX),
+        y: Math.min(start.y, e.clientY),
+        width: Math.abs(e.clientX - start.x),
+        height: Math.abs(e.clientY - start.y),
+      };
+      Object.assign(box.style, {
+        display: "block",
+        left: `${rect.x}px`,
+        top: `${rect.y}px`,
+        width: `${rect.width}px`,
+        height: `${rect.height}px`,
+      });
+    });
+
+    layer.addEventListener("pointerup", async () => {
+      const selected = rect;
+      stopRegionSelection();
+      if (!selected || selected.width < MIN_SIZE || selected.height < MIN_SIZE) return;
+
+      // Espera o navegador redesenhar sem o overlay antes de tirar o print.
+      await nextFrame();
+      await nextFrame();
+      chrome.runtime.sendMessage({
+        type: "region-selected",
+        rect: selected,
+        viewportWidth: window.innerWidth,
+      });
+    });
+
+    window.addEventListener("keydown", onRegionKey, true);
+  }
+
+  function onRegionKey(e) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      stopRegionSelection();
+    }
+  }
+
+  function stopRegionSelection() {
+    window.removeEventListener("keydown", onRegionKey, true);
+    removeOverlay();
+  }
+
+  // ---------- Modo área (HTML) ----------
+
+  function startElementPicker() {
+    if (overlayHost) return;
+    pendingNotice = "";
+    if (panel) panel.host.style.display = "none"; // não atrapalhar a escolha
+
+    overlayHost = document.createElement("div");
+    Object.assign(overlayHost.style, { position: "fixed", inset: "0", zIndex: Z_TOP, pointerEvents: "none" });
+    const root = overlayHost.attachShadow({ mode: "closed" });
+    root.innerHTML = `
+      <style>
+        :host { all: initial; }
+        .box { --c: 147, 197, 253; position: fixed; display: none; box-sizing: border-box;
+               background: rgba(var(--c), .16); border: 1.5px solid rgba(var(--c), .75); border-radius: 6px;
+               box-shadow: 0 0 0 4px rgba(var(--c), .12);
+               transition: left .08s ease, top .08s ease, width .08s ease, height .08s ease; }
+        .tag { position: absolute; left: -1.5px; bottom: calc(100% + 6px); white-space: nowrap;
+               background: rgba(255,255,255,.94); color: #3a3a3a; border: 1px solid rgba(var(--c), .6);
+               font: 500 11px/1 "Segoe UI", system-ui, sans-serif; padding: 5px 9px; border-radius: 999px;
+               box-shadow: 0 1px 6px rgba(0,0,0,.1); }
+        .box.inside .tag { bottom: auto; top: 6px; left: 6px; }
+        .hint { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+                background: rgba(255,255,255,.94); color: #3a3a3a; backdrop-filter: blur(6px);
+                font: 13px "Segoe UI", system-ui, sans-serif; padding: 8px 16px; border-radius: 999px;
+                box-shadow: 0 2px 14px rgba(0,0,0,.12); }
+        kbd { font: inherit; font-size: 11px; background: #eef0f3; border-radius: 4px; padding: 1px 5px; }
+      </style>
+      <div class="box"><span class="tag"></span></div>
+      <div class="hint">Clique na área com as questões · <kbd>↑</kbd> amplia · <kbd>↓</kbd> reduz · <kbd>Enter</kbd> confirma · <kbd>Esc</kbd> cancela</div>`;
+    document.documentElement.appendChild(overlayHost);
+
+    picker = {
+      box: root.querySelector(".box"),
+      tag: root.querySelector(".tag"),
+      base: null, // elemento sob o mouse
+      level: 0, // quantos níveis acima do elemento sob o mouse
+      measured: null, // último elemento cujo tamanho em tokens foi calculado
+      frame: 0,
+      done: false,
+    };
+    chrome.storage.local
+      .get({ highlightColor: DEFAULT_HIGHLIGHT_COLOR })
+      .then(({ highlightColor }) => applyHighlightColor(highlightColor));
+
+    document.documentElement.classList.add(PICKING_CLASS);
+    for (const type of BLOCKED_EVENTS) window.addEventListener(type, onPickerPointer, true);
+    window.addEventListener("mousemove", onPickerMove, true);
+    window.addEventListener("keydown", onPickerKey, true);
+    window.addEventListener("scroll", schedulePickerDraw, true);
+    window.addEventListener("resize", schedulePickerDraw);
+  }
+
+  function onPickerMove(e) {
+    if (picker.done) return;
+    let el = document.elementFromPoint(e.clientX, e.clientY);
+    // Partes de uma linha (span, b, a...) sobem até o bloco que as contém.
+    while (el && el.parentElement && getComputedStyle(el).display.startsWith("inline")) el = el.parentElement;
+    if (!el || el === picker.base) return;
+    picker.base = el;
+    picker.level = 0;
+    schedulePickerDraw();
+  }
+
+  function onPickerKey(e) {
+    if (!["Escape", "ArrowUp", "ArrowDown", "Enter"].includes(e.key)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.key === "Escape") return stopElementPicker();
+    if (!picker.base) return;
+    if (e.key === "ArrowUp") {
+      const parent = pickedElement().parentElement;
+      if (parent && parent !== document.documentElement) picker.level++;
+    } else if (e.key === "ArrowDown") {
+      picker.level = Math.max(0, picker.level - 1);
+    } else if (e.key === "Enter") {
+      confirmPick();
+      return stopElementPicker();
+    }
+    schedulePickerDraw();
+  }
+
+  function onPickerPointer(e) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.type === "pointerdown" && e.button === 0 && !picker.done && picker.base) {
+      confirmPick();
+      // Continua bloqueando até o "click" que vem depois, para o site não recebê-lo.
+      setTimeout(stopElementPicker, 600);
+    } else if (e.type === "click" && picker.done) {
+      stopElementPicker();
+    } else if (e.type === "contextmenu" && !picker.done) {
+      stopElementPicker();
+    }
+  }
+
+  function pickedElement() {
+    let el = picker.base;
+    for (let i = 0; i < picker.level && el.parentElement; i++) el = el.parentElement;
+    return el;
+  }
+
+  function schedulePickerDraw() {
+    if (!picker || picker.frame) return;
+    picker.frame = requestAnimationFrame(() => {
+      picker.frame = 0;
+      drawPicker();
+    });
+  }
+
+  function drawPicker() {
+    if (!picker?.base || picker.done) return;
+    const el = pickedElement();
+    const r = el.getBoundingClientRect();
+    Object.assign(picker.box.style, {
+      display: "block",
+      left: `${r.left}px`,
+      top: `${r.top}px`,
+      width: `${r.width}px`,
+      height: `${r.height}px`,
+    });
+    // Perto do topo a etiqueta ficaria atrás da barra de dicas: vai para dentro da área.
+    picker.box.classList.toggle("inside", r.top < 72);
+
+    if (picker.measured !== el) {
+      picker.measured = el;
+      const tokens = estimateTokens(cleanText(el.innerText));
+      picker.tag.textContent = `${describe(el)} · ≈${tokens.toLocaleString("pt-BR")} tokens`;
+    }
+  }
+
+  function confirmPick() {
+    const el = pickedElement();
+    picker.done = true;
+    removeOverlay();
+    document.documentElement.classList.remove(PICKING_CLASS);
+
+    const text = cleanText(el.innerText);
+    if (!text) {
+      showError("Essa área não tem texto. Para questões em imagem, use o modo print.");
+      return;
+    }
+    const images = [...el.querySelectorAll("img, svg, canvas, video")].filter((node) => {
+      const r = node.getBoundingClientRect();
+      return r.width >= 48 && r.height >= 48;
+    }).length;
+    pendingNotice = images
+      ? `${images} imagem(ns) na área não foram enviadas — para figuras use o modo print`
+      : "";
+    chrome.runtime.sendMessage({ type: "element-selected", text });
+  }
+
+  function stopElementPicker() {
+    if (!picker) return;
+    for (const type of BLOCKED_EVENTS) window.removeEventListener(type, onPickerPointer, true);
+    window.removeEventListener("mousemove", onPickerMove, true);
+    window.removeEventListener("keydown", onPickerKey, true);
+    window.removeEventListener("scroll", schedulePickerDraw, true);
+    window.removeEventListener("resize", schedulePickerDraw);
+    cancelAnimationFrame(picker.frame);
+    document.documentElement.classList.remove(PICKING_CLASS);
+    const wasCancelled = !picker.done;
+    picker = null;
+    if (wasCancelled) removeOverlay();
+  }
+
+  function applyHighlightColor(color) {
+    if (!/^#[0-9a-f]{6}$/i.test(color ?? "")) color = DEFAULT_HIGHLIGHT_COLOR;
+    const rgb = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16)).join(", ");
+    picker.box.style.setProperty("--c", rgb);
+  }
+
+  // Remove espaços repetidos e linhas vazias em excesso (cada uma custa tokens).
+  function cleanText(text) {
+    return text
+      .replace(/ /g, " ")
+      .split("\n")
+      .map((line) => line.replace(/[ \t]+/g, " ").trim())
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  // Estimativa grosseira (~3,5 caracteres por token em português).
+  function estimateTokens(text) {
+    return Math.max(1, Math.round(text.length / 3.5));
+  }
+
+  function describe(el) {
+    const name = el.tagName.toLowerCase();
+    if (el.id) return `${name}#${el.id}`.slice(0, 32);
+    const cls = typeof el.className === "string" ? el.className.trim().split(/\s+/)[0] : "";
+    return (cls ? `${name}.${cls}` : name).slice(0, 32);
+  }
+
+  // ---------- Comum ----------
+
+  function removeOverlay() {
+    overlayHost?.remove();
+    overlayHost = null;
+    if (panel && panel.text) panel.host.style.display = "";
+  }
+
+  function nextFrame() {
+    return new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  function showError(message) {
+    showPanel();
+    panel.finished = true;
+    setStatus("Erro", false);
+    panel.answer.classList.add("error");
+    setAnswer(message);
+  }
+
+  // ---------- Painel de resposta ----------
+
+  function showPanel() {
+    if (panel) {
+      panel.host.style.display = "";
+      return;
+    }
+
+    const host = document.createElement("div");
+    Object.assign(host.style, { position: "fixed", top: "16px", right: "16px", zIndex: Z_TOP });
+    const root = host.attachShadow({ mode: "closed" });
+    root.innerHTML = `
+      <style>
+        /* Impede que estilos herdados do site (cor, fonte, sombra) afetem o painel. */
+        :host { all: initial; }
+        .panel { --header-bg: #d97757; --header-fg: #fff;
+                 width: 400px; max-width: calc(100vw - 32px); background: #fff; color: #111;
+                 border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.3);
+                 font: 14px/1.5 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+        .header { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+                  background: var(--header-bg); color: var(--header-fg); cursor: move; user-select: none; }
+        .titles { flex: 1; min-width: 0; }
+        .title { font-weight: 700; font-size: 14px; }
+        .meta, .usage { font-size: 11px; opacity: .9; }
+        .meta:empty, .usage:empty { display: none; }
+        button { background: color-mix(in srgb, currentColor 18%, transparent); color: inherit;
+                 border: 0; border-radius: 4px; padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+        button:hover { background: color-mix(in srgb, currentColor 32%, transparent); }
+        .color { width: 22px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; flex: none; }
+        .color::-webkit-color-swatch-wrapper { padding: 0; }
+        .color::-webkit-color-swatch { border: 2px solid currentColor; border-radius: 50%; }
+        .status { padding: 6px 12px; font-size: 12px; color: #555; }
+        .status.busy::after { content: ""; display: inline-block; width: 10px; height: 10px;
+                 margin-left: 6px; border: 2px solid var(--header-bg); border-right-color: transparent;
+                 border-radius: 50%; vertical-align: -2px; animation: spin .8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .answer { margin: 0 12px 12px; padding: 12px 14px; max-height: 60vh; overflow: auto;
+                  background: #f4f5f7; border-left: 4px solid var(--header-bg); border-radius: 6px;
+                  color: #0b0b0b; font-size: 16px; font-weight: 500; line-height: 1.55;
+                  white-space: pre-wrap; word-wrap: break-word; }
+        .answer strong { font-weight: 800; }
+        .answer:empty { display: none; }
+        .answer.error { color: #b3261e; background: #fdecea; border-left-color: #b3261e; }
+      </style>
+      <div class="panel">
+        <div class="header">
+          <div class="titles">
+            <div class="title">Claude Asker</div>
+            <div class="meta"></div>
+            <div class="usage"></div>
+          </div>
+          <input class="color" type="color" title="Cor da barra de título">
+          <button class="copy" title="Copiar resposta">Copiar</button>
+          <button class="close" title="Fechar">✕</button>
+        </div>
+        <div class="status"></div>
+        <div class="answer"></div>
+      </div>`;
+    document.documentElement.appendChild(host);
+
+    panel = {
+      host,
+      root: root.querySelector(".panel"),
+      status: root.querySelector(".status"),
+      answer: root.querySelector(".answer"),
+      meta: null, // { model, models, effort, plan }
+      metaLine: root.querySelector(".meta"),
+      usage: root.querySelector(".usage"),
+      color: root.querySelector(".color"),
+      text: "",
+      tokens: null,
+      windows: null, // uso da conta agora
+      before: null, // uso da conta antes da pergunta
+      finished: false,
+    };
+
+    // A cor fica no storage: mudar aqui ou nas opções atualiza o painel e o seletor
+    // na hora, em todas as abas.
+    chrome.storage.local.get({ headerColor: DEFAULT_HEADER_COLOR }).then(({ headerColor }) => applyHeaderColor(headerColor));
+    panel.color.addEventListener("input", () => {
+      applyHeaderColor(panel.color.value);
+      chrome.storage.local.set({ headerColor: panel.color.value });
+    });
+
+    const copyButton = root.querySelector(".copy");
+    copyButton.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(panel.text);
+      copyButton.textContent = "Copiado!";
+      setTimeout(() => (copyButton.textContent = "Copiar"), 1500);
+    });
+    root.querySelector(".close").addEventListener("click", () => {
+      host.style.display = "none";
+    });
+
+    makeDraggable(host, root.querySelector(".header"));
+  }
+
+  function setStatus(text, busy) {
+    panel.status.textContent = text;
+    panel.status.classList.toggle("busy", busy);
+  }
+
+  // Mostra o texto tratando só **negrito**; tudo vira nós de texto (sem innerHTML).
+  function setAnswer(text) {
+    panel.text = text;
+    const parts = text.split(/\*\*(.+?)\*\*/s);
+    panel.answer.replaceChildren(
+      ...parts.map((part, i) => {
+        if (i % 2 === 0) return document.createTextNode(part);
+        const strong = document.createElement("strong");
+        strong.textContent = part;
+        return strong;
+      }),
+    );
+  }
+
+  const EFFORT_LABELS = { low: "baixo", medium: "médio", high: "alto", xhigh: "muito alto", max: "máximo" };
+
+  // "claude-opus-5-5" -> "Opus 5.5"
+  function prettyModel(id) {
+    const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?/.exec(id ?? "");
+    if (!m) return id ?? "";
+    return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ""}`;
+  }
+
+  // Linha 1: modelo · plano · esforço. Linha 2: tokens desta resposta e uso real
+  // da conta (mesmos números do /usage do Claude), com quanto esta pergunta debitou.
+  function renderUsage() {
+    const fmt = (n) => n.toLocaleString("pt-BR");
+    const meta = panel.meta ?? {};
+
+    const models = (meta.models?.length ? meta.models : [meta.model]).filter(Boolean).map(prettyModel);
+    const plan = meta.plan ? (meta.plan === "API" ? "API" : `plano ${meta.plan[0].toUpperCase()}${meta.plan.slice(1)}`) : "";
+    const effort = EFFORT_LABELS[meta.effort] ? `esforço ${EFFORT_LABELS[meta.effort]}` : "";
+    panel.metaLine.textContent = [models.join(" → "), plan, effort].filter(Boolean).join(" · ");
+    panel.metaLine.title = models.length > 1 ? "O primeiro modelo recusou e a resposta foi gerada pelo seguinte." : "";
+
+    const items = [];
+    const details = [];
+    if (panel.tokens) {
+      const { input, output } = panel.tokens;
+      items.push(`${fmt(input + output)} tokens`);
+      details.push(`Esta resposta — entrada: ${fmt(input)} · saída: ${fmt(output)} (inclui raciocínio)`);
+    }
+    for (const w of panel.windows ?? []) {
+      const label = w.name === "session" ? "Sessão" : w.name.replace(/^week \(all models\)$/, "Semana").replace(/^week/, "Semana");
+      const prev = panel.before?.find((b) => b.name === w.name);
+      // O Claude informa o uso em % inteiros: gastos menores que 1% aparecem como "<1%".
+      // Uma queda significa que a janela renovou no meio; aí não há como medir.
+      let debit = "";
+      if (prev && panel.finished) {
+        const diff = w.used - prev.used;
+        if (diff > 0) debit = ` (+${diff}%)`;
+        else if (diff === 0) debit = " (+<1%)";
+      }
+      items.push(`${label}: ${w.used}%${debit}`);
+      details.push(
+        `${label}: ${w.used}% usado${prev ? ` (antes: ${prev.used}%)` : ""}${w.resets ? ` — renova ${w.resets}` : ""}`,
+      );
+    }
+    if (panel.before && panel.finished) details.push("Entre parênteses: quanto esta pergunta debitou do seu limite.");
+
+    // Espaços não separáveis: a linha só quebra entre itens, nunca no meio de um.
+    panel.usage.textContent = items.map((item) => item.replace(/ /g, " ").replace("+<", "+⁠<")).join(" · ");
+    panel.usage.title = details.join("\n");
+  }
+
+  function applyHeaderColor(color) {
+    if (!/^#[0-9a-f]{6}$/i.test(color ?? "")) color = DEFAULT_HEADER_COLOR;
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+    // Luminância percebida: fundo claro recebe texto escuro e vice-versa.
+    const light = 0.299 * r + 0.587 * g + 0.114 * b > 160;
+    panel.root.style.setProperty("--header-bg", color);
+    panel.root.style.setProperty("--header-fg", light ? "#111" : "#fff");
+    panel.color.value = color.toLowerCase();
+  }
+
+  function makeDraggable(host, handle) {
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.target.closest("button, input")) return;
+      handle.setPointerCapture(e.pointerId);
+      const box = host.getBoundingClientRect();
+      const offsetX = e.clientX - box.left;
+      const offsetY = e.clientY - box.top;
+
+      const move = (ev) => {
+        Object.assign(host.style, {
+          left: `${Math.max(0, ev.clientX - offsetX)}px`,
+          top: `${Math.max(0, ev.clientY - offsetY)}px`,
+          right: "auto",
+        });
+      };
+      const up = () => {
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", up);
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", up);
+    });
+  }
+})();

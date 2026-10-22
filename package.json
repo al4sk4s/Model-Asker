@@ -1,0 +1,19 @@
+{
+  "name": "claude-asker",
+  "version": "1.3.0",
+  "private": true,
+  "description": "Extensão de navegador: recorte uma área da tela e o Claude resolve a questão.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs public",
+    "build:dev": "node build.mjs dev",
+    "watch:dev": "node build.mjs dev --watch",
+    "release": "node build.mjs release"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

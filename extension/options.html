@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Claude Asker — Opções</title>
+  <style>
+    body { font: 14px system-ui, sans-serif; max-width: 560px; margin: 32px auto; padding: 0 16px; color: #222; }
+    h1 { font-size: 20px; }
+    label { display: block; margin-top: 16px; font-weight: 600; }
+    input, select, textarea { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px; font: inherit; border: 1px solid #ccc; border-radius: 6px; }
+    textarea { min-height: 110px; resize: vertical; }
+    small { color: #666; font-weight: normal; }
+    button { margin-top: 20px; padding: 10px 18px; font: inherit; background: #d97757; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+    #status { margin-left: 12px; color: #2a7a2a; }
+    [hidden] { display: none !important; }
+    input[type=color] { height: 40px; padding: 2px; cursor: pointer; }
+    .warn { background: #fff6e5; border: 1px solid #f0c36d; padding: 10px; border-radius: 6px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h1>Claude Asker — Opções</h1>
+
+  <label>Como acessar o Claude
+    <select id="provider">
+      <option value="subscription">Minha assinatura (Pro/Max) via Claude Code</option>
+      <option value="api">Chave de API (cobrança por uso)</option>
+    </select>
+    <small id="providerHelp"></small>
+  </label>
+
+  <label id="apiKeyField">Chave da API Anthropic
+    <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off">
+    <small>Crie em console.anthropic.com. Fica salva só neste navegador.</small>
+  </label>
+
+  <label>Modo de captura
+    <select id="captureMode">
+      <option value="print">Print — arrasta um retângulo, envia como imagem</option>
+      <option value="element">Área do HTML — clica num bloco da página, envia só o texto</option>
+    </select>
+    <small>Também dá para trocar clicando com o botão direito no ícone da extensão.
+      O modo área gasta bem menos tokens, mas não envia imagens/figuras.</small>
+  </label>
+
+  <label id="highlightField">Cor do destaque da área
+    <input id="highlightColor" type="color">
+    <small>Aplicada com transparência sobre a área sob o mouse. Muda na hora.</small>
+  </label>
+
+  <label>Modelo
+    <select id="model">
+      <option value="claude-opus-5-5">Claude Opus 5.5 (melhor qualidade)</option>
+      <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (mais rápido/barato)</option>
+      <option value="claude-haiku-5-5">Claude Haiku 5.5 (o mais barato)</option>
+    </select>
+  </label>
+
+  <label>Esforço de raciocínio
+    <select id="effort">
+      <option value="low">Baixo</option>
+      <option value="medium">Médio</option>
+      <option value="high">Alto</option>
+      <option value="xhigh">Muito alto</option>
+    </select>
+    <small>Mais esforço = respostas mais cuidadosas, porém mais lentas e caras.</small>
+  </label>
+
+  <label>Estilo da resposta
+    <select id="style">
+      <option value="direct">Só a resposta (menos tokens)</option>
+      <option value="short">Resposta + justificativa de uma frase</option>
+      <option value="steps">Passos essenciais + resposta</option>
+    </select>
+    <small>O Claude raciocina internamente nos três; muda só o texto que ele escreve.</small>
+  </label>
+
+  <label>Cor da barra de título do painel
+    <input id="headerColor" type="color">
+    <small>Muda na hora. Também dá para trocar pela bolinha de cor na barra do painel.</small>
+  </label>
+
+  <label>Instruções extras (opcional)
+    <textarea id="extra" placeholder="Ex.: as questões são de física do ensino médio."></textarea>
+    <small>Tudo aqui é enviado em toda pergunta — mantenha curto.</small>
+  </label>
+
+  <button id="save">Salvar</button><span id="status"></span>
+
+  <div class="warn" id="apiWarn">
+    A chave fica no armazenamento local da extensão. Não compartilhe nem publique a extensão com a chave dentro.
+  </div>
+
+  <script src="defaults.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

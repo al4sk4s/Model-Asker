@@ -1,0 +1,8 @@
+{
+  "_comment": "Copie para config/dev.json (ignorado pelo git) e ajuste. Só entra no build dev (npm run build:dev). Apague as chaves que não quiser sobrescrever.",
+  "apiKey": "",
+  "model": "claude-opus-5-5",
+  "effort": "medium",
+  "headerColor": "#d97757",
+  "extra": ""
+}
