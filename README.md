@@ -96,6 +96,9 @@ O que a ferramenta já faz sozinha:
   questões de uma vez. Ignora itens de interface dentro da área (botões "Próxima"/"Enviar", cronômetro,
   barra de progresso, navegação, nomes de ícones), de forma conservadora: alternativas nunca são removidas,
   e se o filtro tirar mais da metade do texto a área vai inteira. O painel mostra quantos itens foram ignorados.
+- **Fórmulas** (MathJax e afins) que a página repete quebradas em um símbolo por linha são enviadas uma vez só,
+  e rótulos de plataformas como o Moodle ("Resposta salva", "Vale 1,00 ponto(s).", "Marcar questão"...) saem.
+  Numa prova de Moodle com fórmulas: −58% de texto e −36% de custo, com as mesmas respostas.
 - **Modo print** apara automaticamente as margens vazias do recorte, reduz a imagem em telas com zoom
   (até 30%, sem perder legibilidade) e limita o tamanho a ~0,8 MP.
 - **Cache de prompt desligado**: cada pergunta é diferente e a parte fixa é pequena demais para o cache, então

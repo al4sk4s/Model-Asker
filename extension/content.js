@@ -441,13 +441,61 @@
 
   // Remove espaços repetidos e linhas vazias em excesso (cada uma custa tokens).
   function cleanText(text) {
-    return text
+    const lines = text
       .replace(/ /g, " ")
       .split("\n")
       .map((line) => line.replace(/[ \t]+/g, " ").trim())
+      .filter((line) => !LMS_UI_LINE.test(line));
+    const out = [];
+    for (const line of collapseFormulas(lines)) {
+      const prev = out[out.length - 1];
+      // "a." sozinho seguido de linha vazia: o conteúdo da alternativa vem colado ao rótulo.
+      if (line && prev !== undefined && /^[a-e][.)]$/i.test(prev)) {
+        out[out.length - 1] = `${prev} ${line}`;
+        continue;
+      }
+      if (!line && prev !== undefined && /^[a-e][.)]$/i.test(prev)) continue;
+      // Cabeçalho "Questão N" repetido (o Moodle repete antes das alternativas).
+      if (/^questão \d+$/i.test(line) && out.slice(-8).includes(line)) continue;
+      out.push(line);
+    }
+    return out
       .join("\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
+  }
+
+  // Rótulos de plataformas de prova (Moodle etc.) que ocupam uma linha inteira.
+  // Só a linha exata sai, então não atinge enunciados nem alternativas.
+  const LMS_UI_LINE =
+    /^(resposta salva|ainda não respondida|não respondida|vale \d+([.,]\d+)? ponto\(s\)\.?|marcar questão|remover marcação|texto da questão|limpar minha escolha)$/i;
+
+  // Fórmulas (MathJax e afins) aparecem duas vezes no texto: inteira numa linha e
+  // quebrada em um símbolo por linha ("𝜋", ":", "3", "𝑥"...), mais pedaços de chave
+  // (⎧ ⎩ ⎨). A versão quebrada é descartada quando repete o que veio logo antes;
+  // se não repetir, vira uma linha só.
+  function collapseFormulas(lines) {
+    const flat = (s) => s.normalize("NFKC").replace(/[\s{}]/g, "").replace(/[.,;:]$/, "");
+    // Pedaços de chave desenhados com caracteres não ajudam a ler: saem sempre.
+    lines = lines.map((line) => line.replace(/[⎧⎨⎩⎪⎫⎬⎭]/g, ""));
+    // Rótulos de alternativa ("a.", "b)") encerram um trecho quebrado em vez de entrar nele.
+    const isShort = (line) => [...line].length <= 2 && !/^[a-e][.)]$/i.test(line);
+    const out = [];
+    for (let i = 0; i < lines.length; ) {
+      let j = i;
+      while (j < lines.length && isShort(lines[j]) && (lines[j] || isShort(lines[j + 1] ?? "x"))) j++;
+      const run = lines.slice(i, j).filter(Boolean);
+      if (run.length < 3) {
+        out.push(lines[i]);
+        i++;
+        continue;
+      }
+      const joined = flat(run.join(""));
+      const context = flat(out.slice(-6).join(""));
+      if (joined && !context.includes(joined)) out.push(run.join("").normalize("NFKC"));
+      i = j;
+    }
+    return out;
   }
 
   // Estimativa grosseira (~3,5 caracteres por token em português).
