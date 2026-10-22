@@ -29,10 +29,13 @@ const STYLE_PROMPTS = {
 const PROMPT = "Resolva.";
 const NATIVE_HOST = "com.claude_asker.host";
 
-// Uma imagem custa cerca de (largura × altura) / 750 tokens. Limitar a ~1,15 MP
-// (lado maior ≤ 1568 px) mantém o texto legível sem pagar por pixels inúteis.
+// Uma imagem custa cerca de (largura × altura) / 750 tokens. Limitar a ~0,8 MP
+// (≤ ~1.070 tokens; lado maior ≤ 1568 px) mantém texto de tamanho normal legível
+// sem pagar por pixels inúteis.
 const MAX_SIDE = 1568;
-const MAX_PIXELS = 1_150_000;
+const MAX_PIXELS = 800_000;
+// Margem mantida em volta do conteúdo depois de aparar o fundo vazio (px).
+const TRIM_PADDING = 8;
 // Com zoom do Windows (125%, 150%, 200%) o print tem mais pixels do que a página
 // mostra. Reduzimos em direção à resolução da página, mas nunca mais que 30%,
 // para o texto continuar nítido.
@@ -241,6 +244,7 @@ async function solveWithApi(settings, content, send) {
   // A API cobra por uso; não existe porcentagem de cota como na assinatura.
   const usage = {
     input: u.input_tokens + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
+    cached: u.cache_read_input_tokens ?? 0,
     output: u.output_tokens,
     models: [message.model],
   };
@@ -263,23 +267,54 @@ async function cropToBase64(dataUrl, rect, viewportWidth) {
   const sw = Math.min(bitmap.width - sx, Math.round(rect.width * scale));
   const sh = Math.min(bitmap.height - sy, Math.round(rect.height * scale));
 
+  // Recorte em resolução cheia, depois sem as margens de fundo vazio.
+  const full = new OffscreenCanvas(sw, sh);
+  const fullCtx = full.getContext("2d", { willReadFrequently: true });
+  fullCtx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+  bitmap.close();
+  const box = contentBox(fullCtx, sw, sh, Math.round(TRIM_PADDING * scale));
+
   const shrink = Math.min(
     1,
     Math.max(1 / scale, MIN_SHRINK),
-    MAX_SIDE / Math.max(sw, sh),
-    Math.sqrt(MAX_PIXELS / (sw * sh)),
+    MAX_SIDE / Math.max(box.w, box.h),
+    Math.sqrt(MAX_PIXELS / (box.w * box.h)),
   );
-  const canvas = new OffscreenCanvas(Math.round(sw * shrink), Math.round(sh * shrink));
+  const canvas = new OffscreenCanvas(Math.round(box.w * shrink), Math.round(box.h * shrink));
   const ctx = canvas.getContext("2d");
   ctx.imageSmoothingQuality = "high"; // reamostragem suave: letras sem serrilhado
-  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
+  ctx.drawImage(full, box.x, box.y, box.w, box.h, 0, 0, canvas.width, canvas.height);
 
   let blob = await canvas.convertToBlob({ type: "image/png" });
   if (blob.size > MAX_PNG_BYTES) {
     blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.9 });
   }
   return { mediaType: blob.type, data: toBase64(await blob.arrayBuffer()) };
+}
+
+// Menor retângulo que contém tudo o que difere da cor de fundo (a do canto
+// superior esquerdo), com uma margem. Fundo vazio custa tokens e não ajuda a ler.
+function contentBox(ctx, width, height, padding) {
+  const px = ctx.getImageData(0, 0, width, height).data;
+  const [r0, g0, b0] = px;
+  const differs = (i) => Math.max(Math.abs(px[i] - r0), Math.abs(px[i + 1] - g0), Math.abs(px[i + 2] - b0)) > 24;
+
+  let top = height, bottom = -1, left = width, right = -1;
+  for (let y = 0; y < height; y++) {
+    const row = y * width * 4;
+    for (let x = 0; x < width; x++) {
+      if (!differs(row + x * 4)) continue;
+      if (y < top) top = y;
+      bottom = y;
+      if (x < left) left = x;
+      if (x > right) right = x;
+    }
+  }
+  if (bottom < 0) return { x: 0, y: 0, w: width, h: height }; // só fundo: envia como está
+
+  const x = Math.max(0, left - padding);
+  const y = Math.max(0, top - padding);
+  return { x, y, w: Math.min(width, right + padding + 1) - x, h: Math.min(height, bottom + padding + 1) - y };
 }
 
 function toBase64(buffer) {

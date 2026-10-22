@@ -1,6 +1,6 @@
 {
   "name": "claude-asker",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "Extensão de navegador: recorte uma área da tela e o Claude resolve a questão.",
   "type": "module",

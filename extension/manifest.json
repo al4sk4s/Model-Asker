@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Claude Asker",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Recorte uma área da tela e o Claude resolve a questão.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArF2UcdhMWavLpuaU2TY6QZTqxtYQk/bUylhRdHYcFT8uIhap00z76FgH8I5eyfVoQEwo/3vJFehn1piUx8NENZfScDS9pYP1iZSrs3LnISuzU3F+7fLeLPub+A3RdUD/1hFwW1r52Tm6mTBqIsLac8G5JlH0+tVbldCy5NuNb5poUde8aA8Rl9A9hs2WxbJS8rnQ2Zj07jCHzpR+T+9vCnUihO1qqm2W7NQM/HQjMj/Z/n5z0p23tIGF6PHhv81GVMvYM/YIqsPtVFX0CPCSLQTG3+bSbwOxEgQCxNpM/oy1SpElm2MLShyvbswTStWXMTAoobyc789FtrtAbgkF4QIDAQAB",
   "permissions": ["activeTab", "scripting", "storage", "nativeMessaging", "contextMenus"],
@@ -9,8 +9,18 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
-    "default_title": "Claude Asker — recortar questão (Alt+Shift+S)"
+    "default_title": "Claude Asker — selecionar questão (Alt+Shift+S)",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
   },
   "commands": {
     "_execute_action": {

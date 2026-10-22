@@ -57,7 +57,7 @@ Para desfazer: `host\uninstall.ps1`. Se mover a pasta, rode o `install.ps1` de n
 3. A resposta aparece no painel (arraste pela barra, **Copiar**, **✕**).
 
 Troque de modo clicando com o **botão direito no ícone**. As demais opções ficam em
-*botão direito no ícone → Opções*.
+*botão direito no ícone → Opções* — tudo é salvo automaticamente ao mudar.
 
 ---
 
@@ -77,20 +77,38 @@ Troque de modo clicando com o **botão direito no ícone**. As demais opções f
 
 ```
 Opus 5.5 · plano Pro · esforço médio
-972 tokens · Sessão: 51% (+1%) · Semana: 30% (+<1%)
+377 tokens +595 cache · Sessão: 51% (+1%) · Semana: 30% (+<1%)
 ```
 
+- **377 tokens**: o que esta pergunta gastou de verdade (entrada nova + resposta + raciocínio).
+- **+595 cache**: contexto fixo reaproveitado do cache — custa ~10% do normal.
 - **Sessão / Semana**: uso real da sua conta (o mesmo do comando `/usage` do Claude Code), lido logo após a resposta.
 - **(+N%)**: quanto **esta pergunta** debitou — comparação com o uso medido quando você ativou a seleção.
   O Claude informa o uso em porcentagens inteiras, então gastos menores que 1% aparecem como `+<1%`.
-- Passe o mouse sobre a linha para ver entrada/saída de tokens e quando cada limite renova.
+- Passe o mouse sobre a linha para ver o detalhamento (cache, raciocínio interno) e quando cada limite renova.
+
+O painel e a página de configurações seguem o **tema claro/escuro do navegador**.
 
 ## Economia de tokens
 
-- O modo **área** envia só texto — normalmente o mais barato, principalmente com várias questões de uma vez.
-- No modo **print**, recorte só a questão; a imagem é reduzida automaticamente em telas com zoom (até 30%, sem perder legibilidade).
-- O host desliga chamadas auxiliares do Claude Code (como a geração de título de sessão) que gastariam tokens à toa.
-- Cada pergunta pela assinatura tem ~550 tokens fixos de contexto do Claude Code.
+O que a ferramenta já faz sozinha:
+
+- **Modo área** envia só texto — normalmente o mais barato, principalmente com várias questões de uma vez.
+- **Modo print** apara automaticamente as margens vazias do recorte, reduz a imagem em telas com zoom
+  (até 30%, sem perder legibilidade) e limita o tamanho a ~0,8 MP.
+- O contexto fixo do Claude Code (~550 tokens) fica em **cache** entre perguntas do mesmo modelo (custa ~10%).
+- O host desliga chamadas auxiliares do Claude Code (título de sessão, anexos de contexto) que gastariam tokens à toa.
+
+Escolhendo modelo e esforço (medido com as mesmas questões):
+
+| Configuração | Raciocínio interno | Observação |
+|---|---|---|
+| Opus · baixo | 0–75 tokens | acertou tudo nos testes; ótimo custo-benefício |
+| Opus · médio (padrão) | 8–111 tokens | um pouco mais de cuidado em questões difíceis |
+| Haiku · baixo | 59–366 tokens | gasta tokens parecidos (raciocina mais), mas **cada token pesa bem menos no limite**; erra mais sem raciocínio |
+
+O número de tokens sozinho engana: o que importa para o seu limite é o **(+N%)** — Haiku e Sonnet debitam
+bem menos por token que o Opus.
 
 ## Privacidade
 

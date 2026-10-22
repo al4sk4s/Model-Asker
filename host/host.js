@@ -145,8 +145,13 @@ function handle(message) {
     "--effort", message.effort,
   ];
 
-  // Desliga chamadas auxiliares do Claude Code que também consomem do plano.
-  const env = { ...subscriptionEnv(), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" };
+  // Desliga chamadas auxiliares do Claude Code que também consomem do plano, e os
+  // anexos automáticos de contexto que ele põe em cada mensagem (~25 tokens).
+  const env = {
+    ...subscriptionEnv(),
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+    CLAUDE_CODE_DISABLE_ATTACHMENTS: "1",
+  };
   child = spawn(CLAUDE_BIN, args, { cwd: WORK_DIR, env, windowsHide: true });
 
   let stdoutBuffer = "";
@@ -213,7 +218,10 @@ function handle(message) {
         note,
         usage: {
           input: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
+          // Parte da entrada lida do cache: custa ~10% do normal.
+          cached: u.cache_read_input_tokens ?? 0,
           output: u.output_tokens ?? 0,
+          thinking: u.output_tokens_details?.thinking_tokens ?? 0,
           windows: limits,
           // Modelo(s) que realmente responderam (mais de um se houve fallback).
           models: Object.keys(event.modelUsage ?? {}),

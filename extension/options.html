@@ -2,93 +2,165 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <title>Claude Asker — Opções</title>
+  <meta name="color-scheme" content="light dark">
+  <title>Claude Asker — Configurações</title>
+  <link rel="icon" href="icons/icon32.png">
   <style>
-    body { font: 14px system-ui, sans-serif; max-width: 560px; margin: 32px auto; padding: 0 16px; color: #222; }
-    h1 { font-size: 20px; }
-    label { display: block; margin-top: 16px; font-weight: 600; }
-    input, select, textarea { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px; font: inherit; border: 1px solid #ccc; border-radius: 6px; }
-    textarea { min-height: 110px; resize: vertical; }
-    small { color: #666; font-weight: normal; }
-    button { margin-top: 20px; padding: 10px 18px; font: inherit; background: #d97757; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
-    #status { margin-left: 12px; color: #2a7a2a; }
+    :root {
+      --bg: #f6f5f3; --card: #ffffff; --text: #1d1d1f; --muted: #6b6b70; --border: #e6e3df;
+      --field: #fbfaf9; --accent: #d97757; --accent-soft: rgba(217,119,87,.12); --warn-bg: #fff7e8; --warn: #9a6400;
+      --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.05);
+    }
+    /* Tema escuro acompanha o do navegador/sistema. */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161617; --card: #1f1f21; --text: #ececee; --muted: #9b9ba1; --border: #303034;
+        --field: #262629; --accent: #e8896a; --accent-soft: rgba(232,137,106,.16); --warn-bg: #2d2516; --warn: #e7b65c;
+        --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font: 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; }
+    main { max-width: 640px; margin: 0 auto; padding: 40px 20px 64px; }
+
+    header { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
+    header img { width: 48px; height: 48px; }
+    header h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+    header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+
+    section { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+              box-shadow: var(--shadow); padding: 6px 20px; margin-bottom: 18px; }
+    section h2 { margin: 14px 0 4px; font-size: 12px; font-weight: 650; letter-spacing: .06em;
+                 text-transform: uppercase; color: var(--muted); }
+
+    .field { padding: 14px 0; border-top: 1px solid var(--border); }
+    section h2 + .field { border-top: 0; }
+    .field > label { display: block; font-weight: 600; margin-bottom: 6px; }
+    .hint { display: block; margin-top: 6px; color: var(--muted); font-size: 12.5px; }
+
+    select, input[type=password], input[type=text], textarea {
+      width: 100%; padding: 9px 11px; font: inherit; color: var(--text); background: var(--field);
+      border: 1px solid var(--border); border-radius: 9px; outline: none; transition: border-color .15s, box-shadow .15s;
+    }
+    select:focus, input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    textarea { min-height: 72px; resize: vertical; }
+
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .row > div { flex: 1; }
+    .row .field-label { font-weight: 600; }
+    input[type=color] { flex: none; width: 42px; height: 42px; padding: 0; border: 0; background: none; cursor: pointer; }
+    input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+    input[type=color]::-webkit-color-swatch { border: 2px solid var(--border); border-radius: 50%; }
+
+    .warn { margin: 14px 0; padding: 10px 12px; border-radius: 9px; background: var(--warn-bg); color: var(--warn); font-size: 12.5px; }
     [hidden] { display: none !important; }
-    input[type=color] { height: 40px; padding: 2px; cursor: pointer; }
-    .warn { background: #fff6e5; border: 1px solid #f0c36d; padding: 10px; border-radius: 6px; margin-top: 16px; }
+
+    .toast { position: fixed; bottom: 22px; left: 50%; transform: translate(-50%, 12px); opacity: 0;
+             background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 999px; font-size: 13px;
+             transition: opacity .2s, transform .2s; pointer-events: none; }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 24px; }
+    footer a { color: var(--accent); text-decoration: none; }
   </style>
 </head>
 <body>
-  <h1>Claude Asker — Opções</h1>
+  <main>
+    <header>
+      <img src="icons/icon128.png" alt="">
+      <div>
+        <h1>Claude Asker</h1>
+        <p>Selecione uma questão na página e o Claude responde. As alterações são salvas automaticamente.</p>
+      </div>
+    </header>
 
-  <label>Como acessar o Claude
-    <select id="provider">
-      <option value="subscription">Minha assinatura (Pro/Max) via Claude Code</option>
-      <option value="api">Chave de API (cobrança por uso)</option>
-    </select>
-    <small id="providerHelp"></small>
-  </label>
+    <section>
+      <h2>Conexão</h2>
+      <div class="field">
+        <label for="provider">Como acessar o Claude</label>
+        <select id="provider">
+          <option value="subscription">Minha assinatura (Pro/Max) via Claude Code</option>
+          <option value="api">Chave de API (cobrança por uso)</option>
+        </select>
+        <span class="hint" id="providerHelp"></span>
+      </div>
+      <div class="field" id="apiKeyField">
+        <label for="apiKey">Chave da API Anthropic</label>
+        <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off">
+        <div class="warn" id="apiWarn">A chave fica só neste navegador. Não publique a extensão com ela dentro.</div>
+      </div>
+    </section>
 
-  <label id="apiKeyField">Chave da API Anthropic
-    <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off">
-    <small>Crie em console.anthropic.com. Fica salva só neste navegador.</small>
-  </label>
+    <section>
+      <h2>Captura</h2>
+      <div class="field">
+        <label for="captureMode">Modo</label>
+        <select id="captureMode">
+          <option value="print">Print — arrasta um retângulo, envia como imagem</option>
+          <option value="element">Área do HTML — clica num bloco, envia só o texto</option>
+        </select>
+        <span class="hint">O modo área costuma gastar bem menos tokens, mas não envia figuras.
+          Também dá para trocar pelo botão direito no ícone.</span>
+      </div>
+      <div class="field row" id="highlightField">
+        <div>
+          <span class="field-label">Cor do destaque da área</span>
+          <span class="hint">Aplicada com transparência sobre o bloco sob o mouse.</span>
+        </div>
+        <input id="highlightColor" type="color" aria-label="Cor do destaque da área">
+      </div>
+    </section>
 
-  <label>Modo de captura
-    <select id="captureMode">
-      <option value="print">Print — arrasta um retângulo, envia como imagem</option>
-      <option value="element">Área do HTML — clica num bloco da página, envia só o texto</option>
-    </select>
-    <small>Também dá para trocar clicando com o botão direito no ícone da extensão.
-      O modo área gasta bem menos tokens, mas não envia imagens/figuras.</small>
-  </label>
+    <section>
+      <h2>Resposta</h2>
+      <div class="field">
+        <label for="model">Modelo</label>
+        <select id="model">
+          <option value="claude-opus-5-5">Claude Opus 5.5 — o mais preciso</option>
+          <option value="claude-sonnet-5-5">Claude Sonnet 5.5 — equilibrado</option>
+          <option value="claude-haiku-5-5">Claude Haiku 5.5 — o mais barato</option>
+        </select>
+        <span class="hint" id="modelHelp"></span>
+      </div>
+      <div class="field">
+        <label for="effort">Esforço de raciocínio</label>
+        <select id="effort">
+          <option value="low">Baixo</option>
+          <option value="medium">Médio</option>
+          <option value="high">Alto</option>
+          <option value="xhigh">Muito alto</option>
+        </select>
+        <span class="hint">Mais esforço = mais raciocínio interno (mais tokens), mais cuidado em questões difíceis.</span>
+      </div>
+      <div class="field">
+        <label for="style">Estilo da resposta</label>
+        <select id="style">
+          <option value="direct">Só a resposta (menos tokens)</option>
+          <option value="short">Resposta + justificativa de uma frase</option>
+          <option value="steps">Passos essenciais + resposta</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="extra">Instruções extras <span class="hint" style="display:inline">(opcional)</span></label>
+        <textarea id="extra" placeholder="Ex.: as questões são de física do ensino médio."></textarea>
+        <span class="hint">Vai junto em toda pergunta — mantenha curto.</span>
+      </div>
+    </section>
 
-  <label id="highlightField">Cor do destaque da área
-    <input id="highlightColor" type="color">
-    <small>Aplicada com transparência sobre a área sob o mouse. Muda na hora.</small>
-  </label>
+    <section>
+      <h2>Aparência</h2>
+      <div class="field row">
+        <div>
+          <span class="field-label">Cor da barra de título</span>
+          <span class="hint">Também dá para trocar pela bolinha na barra do painel. O tema claro/escuro segue o navegador.</span>
+        </div>
+        <input id="headerColor" type="color" aria-label="Cor da barra de título">
+      </div>
+    </section>
 
-  <label>Modelo
-    <select id="model">
-      <option value="claude-opus-5-5">Claude Opus 5.5 (melhor qualidade)</option>
-      <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (mais rápido/barato)</option>
-      <option value="claude-haiku-5-5">Claude Haiku 5.5 (o mais barato)</option>
-    </select>
-  </label>
-
-  <label>Esforço de raciocínio
-    <select id="effort">
-      <option value="low">Baixo</option>
-      <option value="medium">Médio</option>
-      <option value="high">Alto</option>
-      <option value="xhigh">Muito alto</option>
-    </select>
-    <small>Mais esforço = respostas mais cuidadosas, porém mais lentas e caras.</small>
-  </label>
-
-  <label>Estilo da resposta
-    <select id="style">
-      <option value="direct">Só a resposta (menos tokens)</option>
-      <option value="short">Resposta + justificativa de uma frase</option>
-      <option value="steps">Passos essenciais + resposta</option>
-    </select>
-    <small>O Claude raciocina internamente nos três; muda só o texto que ele escreve.</small>
-  </label>
-
-  <label>Cor da barra de título do painel
-    <input id="headerColor" type="color">
-    <small>Muda na hora. Também dá para trocar pela bolinha de cor na barra do painel.</small>
-  </label>
-
-  <label>Instruções extras (opcional)
-    <textarea id="extra" placeholder="Ex.: as questões são de física do ensino médio."></textarea>
-    <small>Tudo aqui é enviado em toda pergunta — mantenha curto.</small>
-  </label>
-
-  <button id="save">Salvar</button><span id="status"></span>
-
-  <div class="warn" id="apiWarn">
-    A chave fica no armazenamento local da extensão. Não compartilhe nem publique a extensão com a chave dentro.
-  </div>
+    <footer>Atalho: <strong>Alt+Shift+S</strong> · <a href="https://github.com/al4sk4s/Claude-Asker" target="_blank">GitHub</a></footer>
+  </main>
+  <div class="toast" id="toast">Salvo</div>
 
   <script src="defaults.js"></script>
   <script src="options.js"></script>

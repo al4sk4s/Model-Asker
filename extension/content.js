@@ -60,7 +60,8 @@
         setStatus([msg.note || "Pronto", pendingNotice].filter(Boolean).join(" · "), false);
         panel.finished = true;
         if (msg.usage) {
-          panel.tokens = { input: msg.usage.input, output: msg.usage.output };
+          const { input, cached = 0, output, thinking = 0 } = msg.usage;
+          panel.tokens = { input, cached, output, thinking };
           if (msg.usage.windows) panel.windows = msg.usage.windows;
           if (msg.usage.models?.length) panel.meta = { ...panel.meta, models: msg.usage.models };
         }
@@ -192,6 +193,10 @@
                 font: 13px "Segoe UI", system-ui, sans-serif; padding: 8px 16px; border-radius: 999px;
                 box-shadow: 0 2px 14px rgba(0,0,0,.12); }
         kbd { font: inherit; font-size: 11px; background: #eef0f3; border-radius: 4px; padding: 1px 5px; }
+        @media (prefers-color-scheme: dark) {
+          .tag, .hint { background: rgba(32,33,36,.94); color: #e8e8e8; }
+          kbd { background: #3a3c41; }
+        }
       </style>
       <div class="box"><span class="tag"></span></div>
       <div class="hint">Clique na área com as questões · <kbd>↑</kbd> amplia · <kbd>↓</kbd> reduz · <kbd>Enter</kbd> confirma · <kbd>Esc</kbd> cancela</div>`;
@@ -396,9 +401,16 @@
         /* Impede que estilos herdados do site (cor, fonte, sombra) afetem o painel. */
         :host { all: initial; }
         .panel { --header-bg: #d97757; --header-fg: #fff;
-                 width: 400px; max-width: calc(100vw - 32px); background: #fff; color: #111;
-                 border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.3);
+                 --surface: #fff; --text: #111; --muted: #555; --answer-bg: #f4f5f7; --answer-text: #0b0b0b;
+                 --error-bg: #fdecea; --error-text: #b3261e; --shadow: rgba(0,0,0,.3);
+                 width: 400px; max-width: calc(100vw - 32px); background: var(--surface); color: var(--text);
+                 border-radius: 10px; box-shadow: 0 8px 30px var(--shadow);
                  font: 14px/1.5 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+        /* Tema escuro acompanha o do navegador/sistema. */
+        @media (prefers-color-scheme: dark) {
+          .panel { --surface: #1f2023; --text: #ececec; --muted: #a3a6ab; --answer-bg: #2b2d31;
+                   --answer-text: #f4f4f4; --error-bg: #3b2120; --error-text: #ff8a80; --shadow: rgba(0,0,0,.6); }
+        }
         .header { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
                   background: var(--header-bg); color: var(--header-fg); cursor: move; user-select: none; }
         .titles { flex: 1; min-width: 0; }
@@ -411,18 +423,18 @@
         .color { width: 22px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; flex: none; }
         .color::-webkit-color-swatch-wrapper { padding: 0; }
         .color::-webkit-color-swatch { border: 2px solid currentColor; border-radius: 50%; }
-        .status { padding: 6px 12px; font-size: 12px; color: #555; }
+        .status { padding: 6px 12px; font-size: 12px; color: var(--muted); }
         .status.busy::after { content: ""; display: inline-block; width: 10px; height: 10px;
                  margin-left: 6px; border: 2px solid var(--header-bg); border-right-color: transparent;
                  border-radius: 50%; vertical-align: -2px; animation: spin .8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .answer { margin: 0 12px 12px; padding: 12px 14px; max-height: 60vh; overflow: auto;
-                  background: #f4f5f7; border-left: 4px solid var(--header-bg); border-radius: 6px;
-                  color: #0b0b0b; font-size: 16px; font-weight: 500; line-height: 1.55;
+                  background: var(--answer-bg); border-left: 4px solid var(--header-bg); border-radius: 6px;
+                  color: var(--answer-text); font-size: 16px; font-weight: 500; line-height: 1.55;
                   white-space: pre-wrap; word-wrap: break-word; }
         .answer strong { font-weight: 800; }
         .answer:empty { display: none; }
-        .answer.error { color: #b3261e; background: #fdecea; border-left-color: #b3261e; }
+        .answer.error { color: var(--error-text); background: var(--error-bg); border-left-color: var(--error-text); }
       </style>
       <div class="panel">
         <div class="header">
@@ -520,9 +532,14 @@
     const items = [];
     const details = [];
     if (panel.tokens) {
-      const { input, output } = panel.tokens;
-      items.push(`${fmt(input + output)} tokens`);
-      details.push(`Esta resposta — entrada: ${fmt(input)} · saída: ${fmt(output)} (inclui raciocínio)`);
+      const { input, cached, output, thinking } = panel.tokens;
+      // Tokens lidos do cache custam ~10%: o número que pesa é o de "novos".
+      items.push(`${fmt(input - cached + output)} tokens${cached ? ` +${fmt(cached)} cache` : ""}`);
+      details.push(
+        `Entrada: ${fmt(input)} (${fmt(cached)} do cache, custam ~10%)`,
+        `Saída: ${fmt(output)}${thinking ? ` (${fmt(thinking)} de raciocínio interno)` : ""}`,
+        "O peso no limite depende do modelo: Haiku custa bem menos por token que Opus.",
+      );
     }
     for (const w of panel.windows ?? []) {
       const label = w.name === "session" ? "Sessão" : w.name.replace(/^week \(all models\)$/, "Semana").replace(/^week/, "Semana");
